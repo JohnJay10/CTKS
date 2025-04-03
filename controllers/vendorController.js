@@ -85,7 +85,7 @@ const addCustomer = async (req, res) => {
 
         // 3. Check customer limit (5 per vendor)
         const customerCount = await Customer.countDocuments({ vendorId });
-        if (customerCount >= 5) {
+        if (customerCount >= 10) {
             return res.status(403).json({
                 message: 'Maximum of 5 customers per vendor',
                 currentCount: customerCount,

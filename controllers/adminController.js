@@ -256,9 +256,19 @@ const discoPricing = async (req, res) => {
 const getAllDiscoPricing = async (req, res) => {
     try {
         const pricing = await DiscoPricing.find();
-        return res.status(200).json({ data: pricing });
+        return res.status(200).json({ 
+            success: true,
+            data: pricing.map(item => ({
+                discoName: item.discoName,
+                pricePerUnit: item.pricePerUnit,
+                updatedAt: item.updatedAt
+            })) 
+        });
     } catch (error) {
-        return res.status(500).json({ message: error.message });
+        return res.status(500).json({ 
+            success: false,
+            message: error.message 
+        });
     }
 };
 

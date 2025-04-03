@@ -37,7 +37,7 @@ router.patch('/vendors/:vendorId/approve', auth(['admin']), approveVendor);
 
 
 //Verify Customers
-
+  
 router.get('/customers', auth(['admin']), getAllCustomers);
 
 router.put('/customers/:customerId/verify', auth(['admin']), verifyCustomer);
