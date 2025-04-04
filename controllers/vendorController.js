@@ -167,8 +167,7 @@ const getAllCustomers = async (req, res) => {
       
       // Find customers belonging to this vendor
       const customers = await Customer.find({ vendorId })
-        .select('-verification.MTK1 -verification.MTK2 -verification.RTK1 -verification.RTK2') // Expose sensitive fields
-        .sort({ createdAt: -1 }); // Sort by newest first
+      // Sort by newest first
       
       res.status(200).json({
         success: true,

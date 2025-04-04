@@ -169,7 +169,7 @@ const verifyCustomer = async (req, res) => {
         }
 
         // 3. Validate required fields
-        const requiredFields = { KRN, SGC, TI, MSN };
+        const requiredFields = { KRN, SGC, TI, MSN, MTK1, MTK2, RTK1, RTK2 };
         const missingFields = Object.entries(requiredFields)
             .filter(([_, value]) => !value)
             .map(([key]) => key);
@@ -178,7 +178,7 @@ const verifyCustomer = async (req, res) => {
             return res.status(400).json({
                 message: 'Missing required verification fields',
                 missingFields,
-                requiredFields: ['KRN', 'SGC', 'TI', 'MSN'] 
+                requiredFields: ['KRN', 'SGC', 'TI', 'MSN','RTK1','RTK2','MTK1','MTK2'] 
             });
         }
 
@@ -189,11 +189,11 @@ const verifyCustomer = async (req, res) => {
             SGC,
             TI,
             MSN,
-            MTK1: MTK1 || customer.verification.MTK1,
-            MTK2: MTK2 || customer.verification.MTK2,
-            RTK1: RTK1 || customer.verification.RTK1,
-            RTK2: RTK2 || customer.verification.RTK2,
-            isVerified: true,
+            MTK1,
+            MTK2,
+            RTK1,
+            RTK2,
+            isVerified: true,  
             verifiedAt: new Date(),
             verifiedBy: req.user._id // Admin who verified
         };
