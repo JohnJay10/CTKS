@@ -1,6 +1,9 @@
 const Vendor = require('../models/Vendor');
 const Customer = require('../models/Customer');
+const TokenRequest = require('../models/TokenRequest');
+const Token = require('../models/Token');
 const generateToken = require('../utils/generateToken');
+const ActivityLog = require('../models/ActivityLog');
 
 const loginVendor = async (req, res) => {
     const { email, password } = req.body;
@@ -184,10 +187,127 @@ const getAllCustomers = async (req, res) => {
     }
   };
 
+ // Get Customer Count
+ const getCustomerCount = async (req, res) => {
+  try {
+    // Get vendorId from authenticated vendor (assuming you're using JWT/auth middleware)
+    const vendorId = req.user._id; // Adjust based on your auth setup
+    
+    // Find customers belonging to this vendor
+    const customerCount = await Customer.countDocuments({ vendorId });
+    
+    res.status(200).json({
+      success: true,
+      count: customerCount
+    });
+    
+  } catch (error) {
+    console.error('Error fetching customer count:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching customer count'
+    });
+  }
+}
+
+
+
+// Get Pending Request Count 
+const getPendingRequestCount = async (req, res) => {
+    try {
+        const vendorId = req.user._id; // Adjust based on your auth setup
+        
+        // Find customers belonging to this vendor
+        const pendingRequestCount = await TokenRequest.countDocuments({ vendorId, status: 'pending' });
+        
+        res.status(200).json({
+            success: true,
+            count: pendingRequestCount
+        });
+        
+    } catch (error) {
+        console.error('Error fetching pending request count:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Server error while fetching pending request count'
+        });
+    }
+}
+
+
+//Get Issued Token Count 
+const getIssuedTokenCount = async (req, res) => {
+  try {
+      const vendorId = req.user._id; // Get vendor ID from authenticated user
+      
+      // Count tokens issued to this vendor with status 'issued'
+      const issuedTokenCount = await Token.countDocuments({
+          vendorId: vendorId,
+          status: 'issued'
+      });
+      
+      res.status(200).json({
+          success: true,
+          count: issuedTokenCount
+      });
+      
+  } catch (error) {
+      console.error('Error fetching issued token count:', error);
+      res.status(500).json({
+          success: false,
+          message: 'Server error while fetching issued token count',
+          error: error.message
+      });
+  }
+};
+
+
+
+// Get recent activities (for dashboard)
+const getRecentActivities = async (req, res) => {
+  try {
+    const vendorId = req.user._id;
+    const limit = parseInt(req.query.limit) || 5;
+    
+    const activities = await ActivityLog.find({ vendor: vendorId })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+    
+    const formattedActivities = activities.map(activity => ({
+      id: activity._id,
+      action: getActivityAction(activity.type),
+      time: formatDistanceToNow(activity.createdAt, { addSuffix: true }),
+      status: activity.status,
+      type: activity.type
+    }));
+    
+    res.json({ success: true, activities: formattedActivities });
+  } catch (error) {
+    handleError(res, error, 'Failed to get recent activities');
+  }
+};
+
+// Helper function to get activity action text
+const getActivityAction = (type) => {
+  switch (type) {
+    case 'customer_added': return 'Customer Added';
+    case 'token_requested': return 'Token Requested';
+    case 'payment_received': return 'Payment Received';
+    case 'token_issued': return 'Tokens Issued';
+    default: return 'Activity';
+  }
+};
+
 
 module.exports = {
      loginVendor,
      addCustomer,
-     getAllCustomers
+     getAllCustomers,
+     getCustomerCount,
+     getPendingRequestCount,
+     getIssuedTokenCount,
+     getRecentActivities,
+      getActivityAction
     
-    };
+    };     

@@ -2,6 +2,7 @@ const Admin = require('../models/Admin');
 const Vendor = require('../models/Vendor');
 const Customer = require('../models/Customer');
 const DiscoPricing = require('../models/DiscoPricing');
+const TokenRequest = require('../models/TokenRequest');
 const generateToken = require('../utils/generateToken');
 
 
@@ -298,7 +299,7 @@ const getTokenRequestCount = async (req, res) => {
     } catch (error) {
         return res.status(500).json({ message: error.message });
     }
-};
+};     
     
 
 

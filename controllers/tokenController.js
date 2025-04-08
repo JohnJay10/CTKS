@@ -211,6 +211,33 @@ const fetchTokens = async (req, res) => {
   }
 };
 
+
+//Get Issued Token Count 
+const getIssuedTokenCount = async (req, res) => {
+  try {
+      const vendorId = req.user._id; // Get vendor ID from authenticated user
+      
+      // Count tokens issued to this vendor with status 'issued'
+      const issuedTokenCount = await Token.countDocuments({
+          vendorId: vendorId,
+          status: 'issued'
+      });
+      
+      res.status(200).json({
+          success: true,
+          count: issuedTokenCount
+      });
+      
+  } catch (error) {
+      console.error('Error fetching issued token count:', error);
+      res.status(500).json({
+          success: false,
+          message: 'Server error while fetching issued token count',
+          error: error.message
+      });
+  }
+};
+
 // Helper function to generate electricity token
 function generateElectricityToken() {
   const randomPart = Math.floor(100000000000 + Math.random() * 900000000000);
@@ -222,5 +249,6 @@ module.exports = {
   approveTokenRequest,
   rejectTokenRequest,
   issueTokenToVendor,
-  fetchTokens
+  fetchTokens,
+  getIssuedTokenCount
 };

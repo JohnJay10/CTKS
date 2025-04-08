@@ -1,17 +1,9 @@
 const axios = require('axios');
-const Flutterwave = require('flutterwave-node-v3');
 const TokenRequest = require('../models/TokenRequest');
 const DiscoPricing = require('../models/DiscoPricing');
 
-// Environment variables
-const FLW_PUBLIC_KEY = process.env.FLW_PUBLIC_KEY;
-const FLW_SECRET_KEY = process.env.FLW_SECRET_KEY;
-const FLW_ENCRYPTION_KEY = process.env.FLW_ENCRYPTION_KEY;
-const FLW_WEBHOOK_HASH = process.env.FLW_WEBHOOK_HASH;
+const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
 const APP_URL = process.env.APP_URL || 'http://localhost:3000';
-
-// Initialize Flutterwave
-const flw = new Flutterwave(FLW_PUBLIC_KEY, FLW_SECRET_KEY);
 
 const requestToken = async (req, res) => {
   try {
@@ -19,7 +11,6 @@ const requestToken = async (req, res) => {
     const vendorId = req.user._id;
     const validDiscos = ['IKEDC', 'AEDC', 'EEDC', 'BEDC', 'KEDCO', 'ABA'];
 
-    // Validation
     if (!meterNumber || !meterNumber.toString().match(/^\d{6,20}$/)) {
       return res.status(400).json({ success: false, message: 'Valid meter number required' });
     }
@@ -27,39 +18,33 @@ const requestToken = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid disco' });
     }
 
-    // Get pricing
     const pricing = await DiscoPricing.findOne({ discoName: disco });
     if (!pricing?.pricePerUnit) {
       return res.status(400).json({ success: false, message: 'Pricing unavailable' });
     }
 
-    // Calculate amount
+    // Calculate the amount in NGN (Naira)
     const amountNGN = parseFloat(units) * pricing.pricePerUnit;
     if (isNaN(amountNGN) || amountNGN <= 0) {
       return res.status(400).json({ success: false, message: 'Invalid amount' });
     }
 
-    // Generate transaction reference
+    // Convert the amount to kobo (100 kobo = 1 naira)
+    const amountKobo = amountNGN * 100;
+
+    // Generate a unique transaction reference
     const txRef = `CTK-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-    // Prepare payment data
+    // Save transaction first to avoid duplicate reference issues
+    await TokenRequest.create({ txRef, vendorId, meterNumber, units, amount: amountNGN, disco, status: 'pending' });
+
+    // Payment data to send to Paystack
     const paymentData = {
-      tx_ref: txRef,
-      amount: amountNGN,
-      currency: 'NGN',
-      payment_options: 'card,account,ussd,banktransfer',
-      redirect_url: `${APP_URL}/payment/verify?txRef=${txRef}`,
-      customer: {
-        email: req.user.email || 'customer@example.com',
-        name: `Customer ${meterNumber}`,
-        phone_number: req.user.phone || '08012345678'
-      },
-      customizations: {
-        title: 'CTKS Token Service',
-        description: `Electricity Token for ${disco}`,
-        logo: `${APP_URL}/logo.png`
-      },
-      meta: {
+      email: req.user.email || 'customer@example.com',
+      amount: amountKobo, // Send amount in kobo
+      reference: txRef,
+      callback_url: `${APP_URL}/payment/verify?txRef=${txRef}`,
+      metadata: {
         meterNumber,
         disco,
         units,
@@ -67,39 +52,61 @@ const requestToken = async (req, res) => {
       }
     };
 
-    // Make Flutterwave API request
     const response = await axios.post(
-      'https://api.flutterwave.com/v3/payments',
+      'https://api.paystack.co/transaction/initialize',
       paymentData,
-      { headers: { Authorization: `Bearer ${FLW_SECRET_KEY}`, 'Content-Type': 'application/json' } }
+      { headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`, 'Content-Type': 'application/json' } }
     );
 
-    if (!response.data || response.data.status !== 'success') {
-      throw new Error('Failed to generate payment link');
+    if (response.data.status !== true) {
+      throw new Error('Failed to initialize payment');
     }
 
-    // Save transaction to database
-    await TokenRequest.create({ txRef, vendorId, meterNumber, units, amount: amountNGN, disco, status: 'pending' });
-
-    return res.status(200).json({ success: true, paymentLink: response.data.data.link, txRef });
+    return res.status(200).json({ success: true, paymentLink: response.data.data.authorization_url, txRef });
   } catch (error) {
-    console.error('Error processing token:', error);
-    return res.status(500).json({ success: false, message: 'Payment processing failed', error: error.message });
+    console.error('Request token error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to initiate payment', error: error.message });
+  }
+};
+
+
+
+const cancelPayment = async (req, res) => {
+  try {
+    const { txRef } = req.body;
+    const tokenRequest = await TokenRequest.findOneAndDelete({ txRef, status: 'pending' });
+
+    if (!tokenRequest) {
+      return res.status(404).json({ success: false, message: 'Pending transaction not found' });
+    }
+
+    return res.status(200).json({ success: true, message: 'Payment canceled successfully' });
+  } catch (error) {
+    console.error('Cancel payment error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to cancel payment', error: error.message });
   }
 };
 
 const verifyPayment = async (req, res) => {
   try {
     const { txRef } = req.query;
-    const response = await flw.Transaction.verify({ tx_ref: txRef });
 
-    if (!response.data || response.data.status !== 'successful') {
+    const response = await axios.get(`https://api.paystack.co/transaction/verify/${txRef}`, {
+      headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` }
+    });
+
+    const paymentData = response.data.data;
+    if (paymentData.status !== 'success') {
       return res.status(400).json({ success: false, message: 'Payment not successful' });
     }
 
     const tokenRequest = await TokenRequest.findOneAndUpdate(
       { txRef },
-      { status: 'completed', token: `TKN-${Date.now().toString(36).toUpperCase()}`, flutterwaveReference: response.data.flw_ref },
+      {
+        status: 'completed',
+        token: `TKN-${Date.now().toString(36).toUpperCase()}`,
+        paystackReference: paymentData.reference
+      },
       { new: true }
     );
 
@@ -114,22 +121,28 @@ const verifyPayment = async (req, res) => {
   }
 };
 
-const handleFlutterwaveWebhook = async (req, res) => {
+const handlePaystackWebhook = async (req, res) => {
   try {
-    if (req.headers['verif-hash'] !== FLW_WEBHOOK_HASH) {
-      return res.status(401).json({ status: 'error', message: 'Unauthorized' });
+    const event = req.body;
+
+    if (event.event === 'charge.success') {
+      const data = event.data;
+      const txRef = data.reference;
+
+      const update = {
+        paystackReference: data.reference,
+        status: 'completed',
+        token: `TKN-${Date.now().toString(36).toUpperCase()}`
+      };
+
+      await TokenRequest.findOneAndUpdate({ txRef }, update);
     }
 
-    const { tx_ref, status, flw_ref } = req.body;
-    const update = { flutterwaveReference: flw_ref, status: status === 'successful' ? 'completed' : 'failed' };
-    if (status === 'successful') update.token = `TKN-${Date.now().toString(36).toUpperCase()}`;
-
-    await TokenRequest.findOneAndUpdate({ txRef: tx_ref }, update);
-    return res.status(200).json({ status: 'success' });
+    res.sendStatus(200);
   } catch (error) {
-    console.error('Webhook processing error:', error);
-    return res.status(500).json({ status: 'error', message: 'Webhook processing failed' });
+    console.error('Webhook error:', error);
+    res.sendStatus(500);
   }
 };
 
-module.exports = { requestToken, verifyPayment, handleFlutterwaveWebhook };
+module.exports = { requestToken, verifyPayment, handlePaystackWebhook, cancelPayment };

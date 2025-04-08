@@ -5,26 +5,30 @@ const {
     approveTokenRequest,
     rejectTokenRequest,
     issueTokenToVendor,
-    fetchTokens
-  } = require('../controllers/tokenController');
-const { requestToken, verifyPayment, handleFlutterwaveWebhook } = require('../controllers/tokenRequestController');
-const { handlePaymentWebhook } = require('../controllers/paymentController');
+    fetchTokens,
+    getIssuedTokenCount
+} = require('../controllers/tokenController');
+const { requestToken, verifyPayment, handlePaystackWebhook, cancelPayment } = require('../controllers/tokenRequestController');
 const auth = require('../middleware/authMiddleware');
 
-router.get('/admin/requests', auth(['admin']), getTokenRequests); // Get all pending requests
-router.patch('/admin/approve/:requestId', auth(['admin']), approveTokenRequest); // Approve specific request
-router.patch('/admin/reject/:requestId', auth(['admin']), rejectTokenRequest); // Reject specific request
-router.post('/admin/issue', auth(['admin']), issueTokenToVendor); // Issue token after approval
+// Admin routes
+router.get('/admin/requests', auth(['admin']), getTokenRequests);
+router.patch('/admin/approve/:requestId', auth(['admin']), approveTokenRequest);
+router.patch('/admin/reject/:requestId', auth(['admin']), rejectTokenRequest);
+router.post('/admin/issue', auth(['admin']), issueTokenToVendor);
 
-
-// Fetch Token Route
+// Vendor routes
 router.get('/fetchtoken', auth(['vendor']), fetchTokens);
-
-// Token request routes
+router.get('/issuedtokencount', auth(['vendor']), getIssuedTokenCount);
 router.post('/request', auth(['vendor']), requestToken);
-router.get('/verify-payment/:txRef', auth(['vendor']), verifyPayment);
+
+// Payment verification route (remove auth for Paystack callback)
+router.get('/verify-payment/:txRef', verifyPayment); // Removed auth middleware
+
+// Cancel payment route (remove auth for Paystack callback)
+router.post('/cancel-payment', cancelPayment); // Removed auth middleware
 
 // Webhook route (no authentication)
-router.post('/webhook', handleFlutterwaveWebhook);
+router.post('/webhook', handlePaystackWebhook);
 
 module.exports = router;
