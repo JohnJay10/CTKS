@@ -283,10 +283,21 @@ const  getPendingVendorCount = async (req, res) => {
     }
 };
 
-const  getCustomerVerificationCount = async (req, res) => {
+const getCustomerVerificationCount = async (req, res) => {
     try {
-        const pendingCustomers = await Customer.countDocuments({ verification: { $ne: { isVerified: true } } });
-        return res.status(200).json({ count: pendingCustomers });
+        const { status = 'pending' } = req.query;
+        
+        let query = {};
+        if (status === 'pending') {
+            query = { "verification.isVerified": false };
+        } else if (status === 'verified') {
+            query = { "verification.isVerified": true };
+        } else {
+            return res.status(400).json({ message: 'Invalid status parameter. Use "pending" or "verified"' });
+        }
+
+        const count = await Customer.countDocuments(query);
+        return res.status(200).json({ count });
     } catch (error) {
         return res.status(500).json({ message: error.message });
     }
@@ -294,12 +305,13 @@ const  getCustomerVerificationCount = async (req, res) => {
 
 const getTokenRequestCount = async (req, res) => {
     try {
-        const tokenRequests = await TokenRequest.countDocuments();
-        return res.status(200).json({ count: tokenRequests });
+        // Count only documents with status 'pending'
+        const pendingTokenRequests = await TokenRequest.countDocuments({ status: 'pending' });
+        return res.status(200).json({ count: pendingTokenRequests });
     } catch (error) {
         return res.status(500).json({ message: error.message });
     }
-};     
+}; 
     
 
 

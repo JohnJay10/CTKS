@@ -15,7 +15,11 @@ const tokenRequestSchema = new mongoose.Schema({
         type: String, 
         enum: ["initiated", "pending", "completed", "failed"],
         default: "initiated" 
-    }
-}, { timestamps: true });
+    },
+    paymentMethod: { type: String, enum: ["manual", "bankTransfer"], required:  true },
+    paymentDetails: { type: String },
+    paymentDate: { type: Date },
+    token: { type: String },
+    }, { timestamps: true });
 
 module.exports = mongoose.model('TokenRequest', tokenRequestSchema);

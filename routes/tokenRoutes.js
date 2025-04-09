@@ -8,7 +8,7 @@ const {
     fetchTokens,
     getIssuedTokenCount
 } = require('../controllers/tokenController');
-const { requestToken, verifyPayment, handlePaystackWebhook, cancelPayment } = require('../controllers/tokenRequestController');
+const { requestToken,confirmPayment   } = require('../controllers/tokenRequestController');
 const auth = require('../middleware/authMiddleware');
 
 // Admin routes
@@ -20,15 +20,20 @@ router.post('/admin/issue', auth(['admin']), issueTokenToVendor);
 // Vendor routes
 router.get('/fetchtoken', auth(['vendor']), fetchTokens);
 router.get('/issuedtokencount', auth(['vendor']), getIssuedTokenCount);
+
+
+
 router.post('/request', auth(['vendor']), requestToken);
 
-// Payment verification route (remove auth for Paystack callback)
-router.get('/verify', verifyPayment); // Removed auth middleware     
+router.post('/confirm-payment', auth(['vendor']), confirmPayment);
 
-// Cancel payment route (remove auth for Paystack callback)
-router.post('/cancel-payment', cancelPayment); // Removed auth middleware
+// // Payment verification route (remove auth for Paystack callback)
+// router.get('/verify', verifyPayment); // Removed auth middleware     
 
-// Webhook route (no authentication)
-router.post('/webhook', handlePaystackWebhook);
+// // Cancel payment route (remove auth for Paystack callback)
+// router.post('/cancel-payment', cancelPayment); // Removed auth middleware
+
+// // Webhook route (no authentication)
+// router.post('/webhook', handlePaystackWebhook);
 
 module.exports = router;
