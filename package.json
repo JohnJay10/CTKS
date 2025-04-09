@@ -19,11 +19,14 @@
     "cors": "^2.8.5",
     "ctks-backend": "file:",
     "dotenv": "^16.4.7",
+    "expo-print": "~14.0.3",
+    "expo-sharing": "~13.0.1",
     "express": "^4.21.2",
     "flutterwave-node-v3": "^1.1.15",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.13.0",
     "nodemailer": "^6.10.0",
+    "react-native-render-html": "^6.3.4",
     "termii-nodejs": "^1.1.2"
   },
   "devDependencies": {

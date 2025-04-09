@@ -46,7 +46,7 @@ router.put('/customers/:customerId/verify', auth(['admin']), verifyCustomer);
 
 //Counts 
 
-router.get('/token-request-count', auth(['admin']), getTokenRequestCount);
+router.get('/token-request-count', auth(['admin']), getTokenRequestCount); 
 router.get('/pending-vendor-count', auth(['admin']), getPendingVendorCount);
 router.get('/customer-verification-count', auth(['admin']), getCustomerVerificationCount);
 

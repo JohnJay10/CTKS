@@ -7,10 +7,11 @@ const APP_URL = process.env.APP_URL || 'http://localhost:3000';
 
 const requestToken = async (req, res) => {
   try {
-    const { meterNumber, units, disco } = req.body;
+    const { meterNumber, units, disco, email } = req.body;
     const vendorId = req.user._id;
     const validDiscos = ['IKEDC', 'AEDC', 'EEDC', 'BEDC', 'KEDCO', 'ABA'];
 
+    // Validation
     if (!meterNumber || !meterNumber.toString().match(/^\d{6,20}$/)) {
       return res.status(400).json({ success: false, message: 'Valid meter number required' });
     }
@@ -23,32 +24,39 @@ const requestToken = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Pricing unavailable' });
     }
 
-    // Calculate the amount in NGN (Naira)
     const amountNGN = parseFloat(units) * pricing.pricePerUnit;
     if (isNaN(amountNGN) || amountNGN <= 0) {
       return res.status(400).json({ success: false, message: 'Invalid amount' });
     }
 
-    // Convert the amount to kobo (100 kobo = 1 naira)
-    const amountKobo = amountNGN * 100;
-
-    // Generate a unique transaction reference
+    const amountKobo = Math.round(amountNGN * 100);
     const txRef = `CTK-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-    // Save transaction first to avoid duplicate reference issues
-    await TokenRequest.create({ txRef, vendorId, meterNumber, units, amount: amountNGN, disco, status: 'pending' });
+    // Create token request with pending status
+    const tokenRequest = await TokenRequest.create({
+      txRef,
+      vendorId,
+      meterNumber,
+      units,
+      amount: amountNGN,
+      disco,
+      status: 'initiated', // Initial status
+      customerEmail: email
+    });
 
-    // Payment data to send to Paystack
+    // Initialize Paystack payment
     const paymentData = {
-      email: req.user.email || 'customer@example.com',
-      amount: amountKobo, // Send amount in kobo
+      email: email || 'customer@example.com',
+      amount: amountKobo,
       reference: txRef,
-      callback_url: `${APP_URL}/payment/verify?txRef=${txRef}`,
+      callback_url: `${APP_URL}/api/tokens/verify?txRef=${txRef}`,
       metadata: {
         meterNumber,
         disco,
         units,
-        vendorId
+        vendorId,
+        txRef,
+        tokenRequestId: tokenRequest._id
       }
     };
 
@@ -58,66 +66,88 @@ const requestToken = async (req, res) => {
       { headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`, 'Content-Type': 'application/json' } }
     );
 
-    if (response.data.status !== true) {
+    if (!response.data.status) {
+      await TokenRequest.findByIdAndUpdate(tokenRequest._id, { status: 'payment_failed' });
       throw new Error('Failed to initialize payment');
     }
 
-    return res.status(200).json({ success: true, paymentLink: response.data.data.authorization_url, txRef });
+    res.status(200).json({
+      success: true,
+      paymentLink: response.data.data.authorization_url,
+      reference: txRef,
+      amount: amountNGN
+    });
+
   } catch (error) {
     console.error('Request token error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to initiate payment', error: error.message });
+    res.status(500).json({
+      success: false,
+      message: 'Failed to initiate payment',
+      error: error.message
+    });
   }
 };
 
 
 
-const cancelPayment = async (req, res) => {
-  try {
-    const { txRef } = req.body;
-    const tokenRequest = await TokenRequest.findOneAndDelete({ txRef, status: 'pending' });
-
-    if (!tokenRequest) {
-      return res.status(404).json({ success: false, message: 'Pending transaction not found' });
-    }
-
-    return res.status(200).json({ success: true, message: 'Payment canceled successfully' });
-  } catch (error) {
-    console.error('Cancel payment error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to cancel payment', error: error.message });
-  }
-};
 
 const verifyPayment = async (req, res) => {
   try {
     const { txRef } = req.query;
 
-    const response = await axios.get(`https://api.paystack.co/transaction/verify/${txRef}`, {
-      headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` }
+     // First clean up any expired initiated requests for this txRef
+     await TokenRequest.deleteMany({
+      txRef,
+      status: 'initiated',
+      expiresAt: { $lt: new Date() }
     });
+
+    // Verify payment with Paystack
+    const response = await axios.get(
+      `https://api.paystack.co/transaction/verify/${txRef}`,
+      { headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` } }
+    );
 
     const paymentData = response.data.data;
     if (paymentData.status !== 'success') {
-      return res.status(400).json({ success: false, message: 'Payment not successful' });
+      return res.status(400).json({
+        success: false,
+        message: 'Payment not successful',
+        status: paymentData.status
+      });
     }
 
+    // Update token request to pending (admin will approve later)
     const tokenRequest = await TokenRequest.findOneAndUpdate(
       { txRef },
-      {
-        status: 'completed',
-        token: `TKN-${Date.now().toString(36).toUpperCase()}`,
-        paystackReference: paymentData.reference
+      { 
+        status: 'pending', 
+        paystackReference: paymentData.reference,
+        paymentVerifiedAt: new Date()
       },
       { new: true }
     );
 
     if (!tokenRequest) {
-      return res.status(404).json({ success: false, message: 'Transaction not found' });
+      return res.status(404).json({
+        success: false,
+        message: 'Token request not found'
+      });
     }
 
-    return res.status(200).json({ success: true, token: tokenRequest.token, details: tokenRequest });
+    res.status(200).json({
+      success: true,
+      message: 'Payment verified. Token request is pending admin approval.',
+      request: tokenRequest
+    });
+
   } catch (error) {
     console.error('Verification error:', error);
-    return res.status(500).json({ success: false, message: 'Verification failed', error: error.message });
+    res.status(500).json({
+      success: false,
+      message: 'Payment verification failed',
+      error: error.message
+    });
   }
 };
 
@@ -127,15 +157,17 @@ const handlePaystackWebhook = async (req, res) => {
 
     if (event.event === 'charge.success') {
       const data = event.data;
-      const txRef = data.reference;
+      const txRef = data.metadata?.txRef || data.reference;
 
-      const update = {
-        paystackReference: data.reference,
-        status: 'completed',
-        token: `TKN-${Date.now().toString(36).toUpperCase()}`
-      };
-
-      await TokenRequest.findOneAndUpdate({ txRef }, update);
+      // Update token request to pending
+      await TokenRequest.findOneAndUpdate(
+        { txRef },
+        {
+          status: 'pending',
+          paystackReference: data.reference,
+          paymentVerifiedAt: new Date()
+        }
+      );
     }
 
     res.sendStatus(200);
@@ -145,4 +177,39 @@ const handlePaystackWebhook = async (req, res) => {
   }
 };
 
-module.exports = { requestToken, verifyPayment, handlePaystackWebhook, cancelPayment };
+const cancelPayment = async (req, res) => {
+  try {
+    const { txRef } = req.body;
+    const tokenRequest = await TokenRequest.findOneAndUpdate(
+      { txRef, status: 'payment_pending' },
+      { status: 'cancelled' },
+      { new: true }
+    );
+
+    if (!tokenRequest) {
+      return res.status(404).json({
+        success: false,
+        message: 'Pending transaction not found or already processed'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Payment canceled successfully'
+    });
+  } catch (error) {
+    console.error('Cancel payment error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to cancel payment',
+      error: error.message
+    });
+  }
+};
+
+module.exports = {
+  requestToken,
+  verifyPayment,
+  handlePaystackWebhook,
+  cancelPayment
+};

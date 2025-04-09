@@ -105,9 +105,9 @@ const issueTokenToVendor = async (req, res) => {
     }
 
     // 2. Validate token format (16-20 digits)
-    if (!/^\d{16,20}$/.test(tokenValue)) {
+    if (!/^\d{16,45}$/.test(tokenValue)) {
       return res.status(400).json({
-        message: 'Token must be 16-20 digits',
+        message: 'Token must be 16-45 digits',
       });
     }
 

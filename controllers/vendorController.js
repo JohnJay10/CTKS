@@ -86,17 +86,7 @@ const addCustomer = async (req, res) => {
             return res.status(403).json({ message: 'Vendor account not approved' });
         }
 
-        // 3. Check customer limit (5 per vendor)
-        const customerCount = await Customer.countDocuments({ vendorId });
-        if (customerCount >= 10) {
-            return res.status(403).json({
-                message: 'Maximum of 5 customers per vendor',
-                currentCount: customerCount,
-                limit: 5
-            });
-        }
-
-        // 4. Check for duplicate meter number (globally unique per model)
+        // 3. Check for duplicate meter number (globally unique per model)
         const existingCustomer = await Customer.findOne({ meterNumber });
         if (existingCustomer) {
             return res.status(409).json({
@@ -108,7 +98,7 @@ const addCustomer = async (req, res) => {
             });
         }
 
-        // 5. Create customer (aligned with model schema)
+        // 4. Create customer (aligned with model schema)
         const customer = new Customer({
             meterNumber,
             disco,
@@ -121,7 +111,7 @@ const addCustomer = async (req, res) => {
 
         await customer.save();
 
-        // 6. Return response (excluding sensitive fields)
+        // 5. Return response (excluding sensitive fields)
         return res.status(201).json({
             message: 'Customer registered successfully',
             customer: {

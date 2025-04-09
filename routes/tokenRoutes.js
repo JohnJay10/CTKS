@@ -23,7 +23,7 @@ router.get('/issuedtokencount', auth(['vendor']), getIssuedTokenCount);
 router.post('/request', auth(['vendor']), requestToken);
 
 // Payment verification route (remove auth for Paystack callback)
-router.get('/verify-payment/:txRef', verifyPayment); // Removed auth middleware
+router.get('/verify', verifyPayment); // Removed auth middleware     
 
 // Cancel payment route (remove auth for Paystack callback)
 router.post('/cancel-payment', cancelPayment); // Removed auth middleware
