@@ -16,7 +16,7 @@ const tokenSchema = new mongoose.Schema({
     status: { 
         type: String, 
         enum: ["pending", "issued", "used", "expired"],
-        default: "pending" 
+        default: "pending"  
     },
     expiryDate: { type: Date, required: true }
 }, { timestamps: true });

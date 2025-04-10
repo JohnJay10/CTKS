@@ -13,7 +13,7 @@ const tokenRequestSchema = new mongoose.Schema({
     },
     status: { 
         type: String, 
-        enum: ["initiated", "pending", "completed", "failed"],
+        enum: ["initiated", "pending","approved", "completed", "failed"],
         default: "initiated" 
     },
     paymentMethod: { type: String, enum: ["manual", "bankTransfer"], required:  true },

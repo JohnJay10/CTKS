@@ -8,14 +8,14 @@ const {
     fetchTokens,
     getIssuedTokenCount
 } = require('../controllers/tokenController');
-const { requestToken,confirmPayment   } = require('../controllers/tokenRequestController');
+const { requestToken,confirmPayment,cancelPayment   } = require('../controllers/tokenRequestController');
 const auth = require('../middleware/authMiddleware');
 
 // Admin routes
 router.get('/admin/requests', auth(['admin']), getTokenRequests);
 router.patch('/admin/approve/:requestId', auth(['admin']), approveTokenRequest);
 router.patch('/admin/reject/:requestId', auth(['admin']), rejectTokenRequest);
-router.post('/admin/issue', auth(['admin']), issueTokenToVendor);
+router.post('/admin/issue', auth(['admin']), issueTokenToVendor);   
 
 // Vendor routes
 router.get('/fetchtoken', auth(['vendor']), fetchTokens);
@@ -31,7 +31,7 @@ router.post('/confirm-payment', auth(['vendor']), confirmPayment);
 // router.get('/verify', verifyPayment); // Removed auth middleware     
 
 // // Cancel payment route (remove auth for Paystack callback)
-// router.post('/cancel-payment', cancelPayment); // Removed auth middleware
+router.post('/cancel-payment', cancelPayment); // Removed auth middleware
 
 // // Webhook route (no authentication)
 // router.post('/webhook', handlePaystackWebhook);

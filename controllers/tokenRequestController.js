@@ -98,9 +98,54 @@ const confirmPayment = async (req, res) => {
 };
 
 
+const cancelPayment = async (req, res) => {
+  try {
+    const { txRef } = req.body;
+    
+    // First verify the request exists and is in initiated state
+    const existingRequest = await TokenRequest.findOne({ 
+      txRef, 
+      status: 'initiated' 
+    });
+
+    if (!existingRequest) {
+      return res.status(404).json({
+        success: false,
+        message: 'Pending transaction not found or already processed'
+      });
+    }
+
+    // Now delete the record
+    const deletedRequest = await TokenRequest.findOneAndDelete({ 
+      txRef,
+      status: 'initiated' 
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Payment canceled and record removed successfully',
+      deletedRequest // Optional: send back the deleted record for reference
+    });
+
+  } catch (error) {
+    console.error('Cancel payment error:', {
+      message: error.message,
+      stack: error.stack,
+      body: req.body
+    });
+    
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to cancel payment',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
 
 module.exports = {
   requestToken,
   confirmPayment,
+  cancelPayment
   
-};
+};      

@@ -26,13 +26,13 @@ const getTokenRequests = async (req, res) => {
   }
 };
 
-// Admin: Approve token request
+// Updated approveTokenRequest
 const approveTokenRequest = async (req, res) => {
   try {
     const { requestId } = req.params;
     
-    const request = await TokenRequest.findByIdAndUpdate(
-      requestId,
+    const request = await TokenRequest.findOneAndUpdate(
+      { _id: requestId, status: 'pending' }, // Only approve pending requests
       { status: 'approved' },
       { new: true }
     ).populate('vendorId', 'name email');
@@ -40,7 +40,7 @@ const approveTokenRequest = async (req, res) => {
     if (!request) {
       return res.status(404).json({
         success: false,
-        message: 'Token request not found'
+        message: 'Pending token request not found'
       });
     }
 
@@ -58,53 +58,60 @@ const approveTokenRequest = async (req, res) => {
   }
 };
 
-// Admin: Reject token request
+// Updated rejectTokenRequest
 const rejectTokenRequest = async (req, res) => {
   try {
     const { requestId } = req.params;
     
-    const request = await TokenRequest.findByIdAndUpdate(
-      requestId,
-      { status: 'rejected' },
-      { new: true }
-    ).populate('vendorId', 'name email');
+    // First find the request to get details for potential logging/notification
+    const request = await TokenRequest.findOne({
+      _id: requestId,
+      status: 'pending'
+    }).populate('vendorId', 'name email');
 
     if (!request) {
       return res.status(404).json({
         success: false,
-        message: 'Token request not found'
+        message: 'Pending token request not found'
       });
     }
 
+    // Delete the request from database
+    await TokenRequest.deleteOne({ _id: requestId });
+
+    
+
     res.status(200).json({
       success: true,
-      message: 'Token request rejected',
-      data: request
+      message: 'Token request deleted successfully',
+      data: {
+        deletedRequest: request
+      }
     });
   } catch (error) {
     console.error('Error rejecting token request:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to reject token request'
+      message: 'Failed to delete token request',
+      error: error.message
     });
   }
 };
 
-// Admin: Issue token to vendor (after approval)
+// Updated issueTokenToVendor
 const issueTokenToVendor = async (req, res) => {
   const { tokenValue, meterNumber, vendorId } = req.body;
   const adminId = req.user._id;
 
   try {
-    // 1. Validate input - Only require tokenValue and meterNumber
+    // 1. Validate input
     if (!tokenValue || !meterNumber) {
       return res.status(400).json({
-        message: 'Token value and meter number are required',
-        requiredFields: ['tokenValue', 'meterNumber']
+        message: 'Token value and meter number are required'
       });
     }
 
-    // 2. Validate token format (16-20 digits)
+    // 2. Validate token format
     if (!/^\d{16,45}$/.test(tokenValue)) {
       return res.status(400).json({
         message: 'Token must be 16-45 digits',
@@ -113,22 +120,23 @@ const issueTokenToVendor = async (req, res) => {
 
     // 3. Verify vendor exists and is approved
     const vendor = await Vendor.findById(vendorId);
-    if (!vendor) {
-      return res.status(404).json({ message: 'Vendor not found' });
-    }
-    if (!vendor.approved) {
-      return res.status(403).json({ message: 'Vendor account not approved' });
+    if (!vendor || !vendor.approved) {
+      return res.status(403).json({ 
+        message: 'Vendor not found or not approved' 
+      });
     }
 
-    // 4. Get the original request to get other details
+    // 4. Get the approved request
     const request = await TokenRequest.findOne({ 
       meterNumber,
       vendorId,
-      status: 'pending'
+      status: 'approved' // Changed from 'pending' to 'approved'
     }).sort({ createdAt: -1 });
 
     if (!request) {
-      return res.status(404).json({ message: 'No pending request found for this meter' });
+      return res.status(404).json({ 
+        message: 'No approved request found for this meter' 
+      });
     }
 
     // 5. Create token record
@@ -142,20 +150,25 @@ const issueTokenToVendor = async (req, res) => {
       vendorId,
       issuedBy: adminId,
       status: 'issued',
-      expiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days
+      expiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
     });
 
     await token.save();
 
-    // 6. Update request status
-    await TokenRequest.findByIdAndUpdate(request._id, { 
-      status: 'completed',
-      tokenId: token._id 
-    });
+    // 6. Update request status to completed
+    const updatedRequest = await TokenRequest.findByIdAndUpdate(
+      request._id, 
+      { 
+        status: 'completed',
+        tokenId: token._id 
+      },
+      { new: true }
+    );
 
-    // 7. Update vendor's token balance (optional)
-    vendor.tokenBalance += request.units;
-    await vendor.save();
+    // 7. Update vendor's token balance
+    await Vendor.findByIdAndUpdate(vendorId, {
+      $inc: { tokenBalance: request.units }
+    });
 
     // 8. Send notification
     await sendTokenNotification(vendor.email, {
@@ -166,20 +179,12 @@ const issueTokenToVendor = async (req, res) => {
       expiryDate: token.expiryDate
     });
 
-    // 9. Return response
     res.status(201).json({
       success: true,
       message: 'Token issued successfully',
       data: {
-        id: token._id,
-        tokenId: token.tokenId,
-        tokenValue,
-        units: request.units,
-        amount: request.amount,
-        disco: request.disco,
-        issuedAt: token.createdAt,
-        expiryDate: token.expiryDate,
-        status: 'issued'
+        token: token,
+        request: updatedRequest
       }
     });
 
