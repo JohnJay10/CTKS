@@ -1,6 +1,7 @@
 const express = require('express');
-const { loginVendor, addCustomer, getAllCustomers, getCustomerCount, getPendingRequestCount, getIssuedTokenCount, getRecentActivities,getActivityAction} = require('../controllers/vendorController');
+const { loginVendor, addCustomer, getAllCustomers, getCustomerCount, getPendingRequestCount, getPendingVerifications, getIssuedTokenCount, getRecentActivities,getActivityAction, getAllAccounts} = require('../controllers/vendorController');
 const {getAllDiscoPricing } = require('../controllers/adminController');
+
 const auth = require('../middleware/authMiddleware');
 const router = express.Router();
 
@@ -26,6 +27,9 @@ router.get('/disco-pricing', auth(['vendor']), getAllDiscoPricing);
 //Get Pending Request Count
 router.get('/getPendingRequestCount', auth(['vendor']), getPendingRequestCount);
 
+//Get Pending Verifications
+router.get('/getPendingVerifications', auth(['vendor']), getPendingVerifications);
+
 //Get Issued Token Count
 router.get('/getIssuedTokenCount', auth(['vendor']), getIssuedTokenCount);
 
@@ -35,6 +39,11 @@ router.get('/activities', auth(['vendor']), getRecentActivities);
 //Get Activity Action
 
 router.get('/getActivityAction/:activityId', auth(['vendor']), getActivityAction);
+
+
+
+//Get All Bank Accounts 
+router.get('/default', auth(['vendor']), getAllAccounts);
 
 
 

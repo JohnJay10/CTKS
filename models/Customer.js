@@ -6,7 +6,7 @@ const CustomerSchema = new mongoose.Schema({
     type: String, 
     required: true, 
     enum: ["ABA", "IKEDC", "IBEDC", "AEDC", "BEDC", "EEDC"] 
-  },
+  },    
   lastToken: { type: String },
   verification: {
     KRN: { type: String },
@@ -17,9 +17,13 @@ const CustomerSchema = new mongoose.Schema({
     MTK2: { type: String },
     RTK1: { type: String },
     RTK2: { type: String },
-    isVerified: { type: Boolean, default: false }
+    isVerified: { type: Boolean, default: false },
+    rejected: { type: Boolean, default: false },          // New field
+    rejectionReason: { type: String },                   // New field
+    rejectedAt: { type: Date },                          // New field
+    rejectedBy: { type: mongoose.Schema.Types.ObjectId } // New field
   },
   vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor' }
-});
+}, { timestamps: true });
 
 module.exports = mongoose.model('Customer', CustomerSchema);

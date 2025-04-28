@@ -62,42 +62,52 @@ const approveTokenRequest = async (req, res) => {
 const rejectTokenRequest = async (req, res) => {
   try {
     const { requestId } = req.params;
-    
-    // First find the request to get details for potential logging/notification
-    const request = await TokenRequest.findOne({
-      _id: requestId,
-      status: 'pending'
-    }).populate('vendorId', 'name email');
+    const { rejectionReason } = req.body; // Get reason from request body
 
-    if (!request) {
+    // Find and update the request
+    const rejectedRequest = await TokenRequest.findOneAndUpdate(
+      {
+        _id: requestId,
+        status: 'pending' // Only reject pending requests
+      },
+      {
+        status: 'rejected',
+        rejectionReason,
+        rejectedAt: new Date(),
+        $inc: { __v: 1 } // Optional: increment version if you're using optimistic concurrency
+      },
+      {
+        new: true, // Return the updated document
+        runValidators: true // Run schema validations on update
+      }
+    ).populate('vendorId', 'name email');
+
+    if (!rejectedRequest) {
       return res.status(404).json({
         success: false,
-        message: 'Pending token request not found'
+        message: 'Pending token request not found or already processed'
       });
     }
 
-    // Delete the request from database
-    await TokenRequest.deleteOne({ _id: requestId });
-
-    
+    // Here you might want to:
+    // 1. Send notification to vendor
+    // 2. Log the rejection
+    // 3. Trigger any other business logic
 
     res.status(200).json({
       success: true,
-      message: 'Token request deleted successfully',
-      data: {
-        deletedRequest: request
-      }
+      message: 'Token request rejected successfully',
+      data: rejectedRequest
     });
   } catch (error) {
     console.error('Error rejecting token request:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to delete token request',
+      message: 'Failed to reject token request',
       error: error.message
     });
   }
 };
-
 // Updated issueTokenToVendor
 const issueTokenToVendor = async (req, res) => {
   const { tokenValue, meterNumber, vendorId } = req.body;
@@ -197,15 +207,128 @@ const issueTokenToVendor = async (req, res) => {
     });
   }
 };
-// Vendor: Fetch tokens (for specific vendor)
+
+
+const getPaymentTransactionHistory = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+    const vendorId = req.query.vendorId;
+    const meterNumber = req.query.meterNumber; // New meterNumber search parameter
+
+    // Build the base query
+    const query = {};
+
+    // If vendorId is provided, add to query
+    if (vendorId) {
+      query.vendorId = vendorId;
+    }
+
+    // If meterNumber is provided, add to query with case-insensitive regex search
+    if (meterNumber) {
+      query.meterNumber = { $regex: meterNumber, $options: 'i' };
+    }
+
+    // Fetch tokens with pagination and filtering
+    const [tokens, total] = await Promise.all([
+      Token.find(query)
+        .skip(skip)
+        .limit(limit)
+        .populate('vendorId', 'username email name')
+        .populate('issuedBy', 'name email')
+        .sort({ createdAt: -1 }),
+      Token.countDocuments(query)
+    ]);
+
+    // Format the response
+    const formattedTokens = tokens.map(token => ({
+      _id: token._id,
+      tokenId: token.tokenId,
+      meterNumber: token.meterNumber,
+      vendor: {
+        _id: token.vendorId?._id,
+        username: token.vendorId?.username,
+        email: token.vendorId?.email,
+        name: token.vendorId?.name
+      },
+      disco: token.disco,
+      units: token.units,
+      amount: token.amount,
+      status: token.status || 'pending',
+      createdAt: token.createdAt,
+      updatedAt: token.updatedAt,
+      expiryDate: token.expiryDate,
+      issuedBy: token.issuedBy
+    }));
+
+    res.status(200).json({
+      success: true,
+      data: formattedTokens,
+      total,
+      totalPages: Math.ceil(total / limit),
+      page,
+      limit
+    });
+  } catch (error) {
+    console.error('Error fetching token history:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch token history'
+    });
+  }
+};
 const fetchTokens = async (req, res) => {
   try {
     const tokens = await Token.find({ vendorId: req.user._id })
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .select('-__v'); // exclude __v field from response
 
     res.status(200).json({
       success: true,
       data: tokens
+    });
+  } catch (error) {
+    console.error('Error fetching tokens:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch tokens'
+    });
+  }
+};
+
+const requesthistory = async (req, res) => {
+  try {
+    // Extract pagination parameters from query
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+
+    // Query for only pending and rejected tokens
+    const tokens = await TokenRequest.find({ 
+      vendorId: req.user._id,
+      status: { $in: ['pending', 'rejected'] } // Only fetch pending or rejected tokens
+    })
+    .sort({ createdAt: -1 }) // Sort by newest first
+    .skip(skip)
+    .limit(limit)
+    .select('-__v'); // exclude __v field from response
+
+    // Get total count for pagination
+    const total = await TokenRequest.countDocuments({
+      vendorId: req.user._id,
+      status: { $in: ['pending', 'rejected'] }
+    });
+
+    res.status(200).json({
+      success: true,
+      data: tokens,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
     });
   } catch (error) {
     console.error('Error fetching tokens:', error);
@@ -240,7 +363,7 @@ const getIssuedTokenCount = async (req, res) => {
           message: 'Server error while fetching issued token count',
           error: error.message
       });
-  }
+  }    
 };
 
 // Helper function to generate electricity token
@@ -255,5 +378,7 @@ module.exports = {
   rejectTokenRequest,
   issueTokenToVendor,
   fetchTokens,
-  getIssuedTokenCount
+  getIssuedTokenCount,
+  getPaymentTransactionHistory,
+  requesthistory
 };

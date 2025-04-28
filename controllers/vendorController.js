@@ -4,6 +4,7 @@ const TokenRequest = require('../models/TokenRequest');
 const Token = require('../models/Token');
 const generateToken = require('../utils/generateToken');
 const ActivityLog = require('../models/ActivityLog');
+const BankAccount = require('../models/BankAccount');
 
 const loginVendor = async (req, res) => {
     const { email, password } = req.body;
@@ -201,6 +202,67 @@ const getAllCustomers = async (req, res) => {
 }
 
 
+const getPendingVerifications = async (req, res) => {
+    try {
+        const vendorId = req.user._id;
+
+        // 1. Get unverified customers (both pending and rejected)
+        const customers = await Customer.find({
+            vendorId,
+            'verification.isVerified': false
+        })
+        .select('_id meterNumber disco lastToken createdAt verification')
+        .sort({ createdAt: -1 });
+
+        // 2. Get pending/rejected token requests (if needed)
+        const tokenRequests = await TokenRequest.find({   
+            vendorId,
+            status: { $in: ['pending', 'rejected'] }
+        })
+        .select('_id status createdAt meterNumber disco lastToken rejectionReason')
+        .sort({ createdAt: -1 });
+
+        // 3. Transform and combine data
+        const responseData = [
+            ...customers.map(customer => ({
+                type: 'customer_verification',
+                _id: customer._id,
+                meterNumber: customer.meterNumber,
+                disco: customer.disco,
+                lastToken: customer.lastToken,
+                status: customer.verification.rejected ? 'rejected' : 'pending',
+                rejectionReason: customer.verification.rejectionReason,
+                rejectedAt: customer.verification.rejectedAt,
+                createdAt: customer.createdAt,
+                verification: customer.verification
+            })),
+            ...tokenRequests.map(request => ({
+                type: 'token_request',
+                _id: request._id,
+                meterNumber: request.meterNumber,
+                disco: request.disco,
+                lastToken: request.lastToken,
+                status: request.status, // 'pending' or 'rejected'
+                rejectionReason: request.rejectionReason,
+                createdAt: request.createdAt
+            }))
+        ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)); // Sort all by newest first
+
+        return res.status(200).json({
+            success: true,
+            count: responseData.length,
+            data: responseData
+        });
+
+    } catch (error) {
+        console.error('Error fetching pending verifications:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to fetch pending verifications',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
 
 // Get Pending Request Count 
 const getPendingRequestCount = async (req, res) => {
@@ -290,6 +352,22 @@ const getActivityAction = (type) => {
 };
 
 
+const getAllAccounts = async (req, res) => {
+  try {
+    const accounts = await BankAccount.find();
+    res.json({
+      success: true,
+      data: accounts
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch bank accounts'
+    });
+  }
+};
+
+
 module.exports = {
      loginVendor,
      addCustomer,
@@ -298,6 +376,8 @@ module.exports = {
      getPendingRequestCount,
      getIssuedTokenCount,
      getRecentActivities,
-      getActivityAction
+      getActivityAction,
+      getPendingVerifications,
+      getAllAccounts
     
     };     

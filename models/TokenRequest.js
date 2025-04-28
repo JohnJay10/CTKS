@@ -13,13 +13,32 @@ const tokenRequestSchema = new mongoose.Schema({
     },
     status: { 
         type: String, 
-        enum: ["initiated", "pending","approved", "completed", "failed"],
+        enum: ["initiated", "pending", "approved", "completed", "failed", "rejected"], // Added "rejected"
         default: "initiated" 
     },
-    paymentMethod: { type: String, enum: ["manual", "bankTransfer"], required:  true },
+    paymentMethod: { type: String, enum: ["manual", "bankTransfer"], required: true },
     paymentDetails: { type: String },
     paymentDate: { type: Date },
     token: { type: String },
-    }, { timestamps: true });
+    // New fields for rejection handling
+    rejectionReason: { 
+        type: String,
+        required: function() { return this.status === 'rejected'; } // Only required when status is rejected
+    },
+    rejectedAt: { 
+        type: Date,
+        required: function() { return this.status === 'rejected'; } // Only required when status is rejected
+    },
+    rejectedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Admin',
+        required: function() { return this.status === 'rejected'; } // Only required when status is rejected
+    }
+}, { 
+    timestamps: true,
+    // Add virtuals and toJSON options if needed
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
+});
 
 module.exports = mongoose.model('TokenRequest', tokenRequestSchema);
