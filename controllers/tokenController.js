@@ -163,29 +163,30 @@ const sendRejectionNotification = async (vendorEmail, rejectionDetails) => {
 };
 // Updated issueTokenToVendor
 const issueTokenToVendor = async (req, res) => {
-  const { tokenValue, meterNumber, vendorId, requestId } = req.body;
+  const { tokenValue, meterNumber, requestId } = req.body; // Changed to use requestId
   const adminId = req.user._id;
 
   try {
-    // Validate input
+    // 1. Validate input - now requires requestId
     if (!tokenValue || !meterNumber || !requestId) {
       return res.status(400).json({
-        message: 'Token value, meter number and request ID are required'
+        message: 'Token value, meter number, and request ID are required'
       });
     }
 
-    // Validate token format
+    // 2. Validate token format
     if (!/^\d{16,45}$/.test(tokenValue)) {
       return res.status(400).json({
         message: 'Token must be 16-45 digits',
       });
     }
 
-    // Verify the request exists and is approved
-    const request = await TokenRequest.findOne({
+    // 3. Get the approved request with populated vendor data
+    const request = await TokenRequest.findOne({ 
       _id: requestId,
       status: 'approved'
-    });
+    })
+    .populate('vendorId', 'name email approved'); // Populate vendor details
 
     if (!request) {
       return res.status(404).json({ 
@@ -193,15 +194,14 @@ const issueTokenToVendor = async (req, res) => {
       });
     }
 
-    // Verify vendor exists and is approved
-    const vendor = await Vendor.findById(vendorId);
-    if (!vendor || !vendor.approved) {
+    // 4. Verify vendor exists and is approved using the populated request
+    if (!request.vendorId || !request.vendorId.approved) {
       return res.status(403).json({ 
         message: 'Vendor not found or not approved' 
       });
     }
 
-    // Create token record
+    // 5. Create token record
     const token = new Token({
       tokenId: uuidv4(),
       tokenValue,
@@ -209,7 +209,8 @@ const issueTokenToVendor = async (req, res) => {
       units: request.units,
       amount: request.amount,
       disco: request.disco,
-      vendorId,
+      vendorId: request.vendorId._id, // Use vendorId from the request
+      requestId: request._id, // Store reference to the original request
       issuedBy: adminId,
       status: 'issued',
       expiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
@@ -217,24 +218,23 @@ const issueTokenToVendor = async (req, res) => {
 
     await token.save();
 
-    // Update request status to completed and link token
-    const updatedRequest = await TokenRequest.findByIdAndUpdate(
+    // 6. Update request status to completed
+    await TokenRequest.findByIdAndUpdate(
       request._id, 
       { 
         status: 'completed',
         tokenId: token._id,
         issuedAt: new Date()
-      },
-      { new: true }
+      }
     );
 
-    // Update vendor's token balance
-    await Vendor.findByIdAndUpdate(vendorId, {
+    // 7. Update vendor's token balance
+    await Vendor.findByIdAndUpdate(request.vendorId._id, {
       $inc: { tokenBalance: request.units }
     });
 
-    // Send notification
-    await sendTokenNotification(vendor.email, {
+    // 8. Send notification
+    await sendTokenNotification(request.vendorId.email, {
       tokenId: token.tokenId,
       meterNumber,
       units: request.units,
@@ -247,7 +247,7 @@ const issueTokenToVendor = async (req, res) => {
       message: 'Token issued successfully',
       data: {
         token: token,
-        request: updatedRequest
+        request: request
       }
     });
 
