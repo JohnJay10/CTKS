@@ -333,13 +333,29 @@ const getPaymentTransactionHistory = async (req, res) => {
 };
 const fetchTokens = async (req, res) => {
   try {
+    // Get page number from query params, default to 1 if not provided
+    const page = parseInt(req.query.page) || 1;
+    const limit = 5; // 5 tokens per page
+    const skip = (page - 1) * limit;
+
+    // Get total count of tokens for pagination info
+    const totalTokens = await Token.countDocuments({ vendorId: req.user._id });
+
     const tokens = await Token.find({ vendorId: req.user._id })
       .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
       .select('-__v'); // exclude __v field from response
 
     res.status(200).json({
       success: true,
-      data: tokens
+      data: tokens,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(totalTokens / limit),
+        totalTokens,
+        tokensPerPage: limit
+      }
     });
   } catch (error) {
     console.error('Error fetching tokens:', error);
