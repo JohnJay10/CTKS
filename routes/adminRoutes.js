@@ -17,7 +17,7 @@ const { registerAdmin,
     deleteVendor,
     deactivateVendor,
     editDiscoPricing,
-    rejectCustomerVerification,
+    rejectCustomer,
     logoutAdmin
 } = require('../controllers/adminController');
 const auth = require('../middleware/authMiddleware');
@@ -59,7 +59,7 @@ router.put('/customers/:customerId/verify', auth(['admin']), verifyCustomer);
 router.put('/customers/:customerId/update', auth(['admin']), updateVerifiedCustomer);
 router.delete('/customers/:customerId/delete', auth(['admin']), deleteCustomer);
 
-router.put('/customers/:customerId/reject', auth(['admin']), rejectCustomerVerification);
+router.put('/customers/:customerId/reject', auth(['admin']), rejectCustomer);
 
 
 

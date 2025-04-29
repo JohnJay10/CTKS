@@ -563,35 +563,68 @@ const getTokenRequestCount = async (req, res) => {
 }; 
 
 
-const rejectCustomerVerification = async (req, res) => {
+const rejectCustomer = async (req, res) => {
     try {
+      const { customerId } = req.params;
       const { rejectionReason } = req.body;
-      
-      const customer = await Customer.findByIdAndUpdate(
-        req.params.id,
-        {
-          $set: {
-            'verification.isVerified': false,
-            'verification.rejected': true,
-            'verification.rejectionReason': rejectionReason,
-            'verification.rejectedAt': new Date(),
-            'verification.rejectedBy': req.user.id
-          }
-        },
-        { new: true }
-      ).populate('vendorId', 'name email'); // Optional: populate vendor info
+      const rejectedBy = req.user._id; // Assuming the rejecting user is authenticated
   
-      // Optional: Notify vendor here via email or notification system
+      // 1. Find the customer
+      const customer = await Customer.findById(customerId);
+      if (!customer) {
+        return res.status(404).json({ message: 'Customer not found' });
+      }
   
-      res.json({
-        success: true,
-        data: customer
+      // 2. Check if customer is already verified
+      if (customer.verification.isVerified) {
+        return res.status(400).json({ 
+          message: 'Cannot reject an already verified customer' 
+        });
+      }
+  
+      // 3. Check if customer is already rejected
+      if (customer.verification.rejected) {
+        return res.status(400).json({ 
+          message: 'Customer is already rejected' 
+        });
+      }
+  
+      // 4. Update the customer with rejection details
+      customer.verification.rejected = true;
+      customer.verification.rejectionReason = rejectionReason;
+      customer.verification.rejectedBy = rejectedBy;
+      // rejectedAt will be automatically set by the pre-save hook
+  
+      await customer.save();
+  
+      // 5. Return response
+      return res.status(200).json({
+        success: true,  // Ensure this field exists
+        message: 'Customer rejected successfully',
+        customer: {
+          _id: customer._id,
+          meterNumber: customer.meterNumber,
+          status: 'rejected',
+          rejectionReason: customer.verification.rejectionReason,
+          rejectedAt: customer.verification.rejectedAt
+        }
       });
+  
     } catch (error) {
-      console.error('Rejection error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to reject verification'
+      console.error('Customer rejection error:', error);
+      
+      // Handle validation errors
+      if (error.name === 'ValidationError') {
+        const errors = Object.values(error.errors).map(err => err.message);
+        return res.status(400).json({
+          message: 'Validation failed',
+          errors
+        });
+      }
+  
+      return res.status(500).json({
+        message: 'Customer rejection failed',
+        error: error.message
       });
     }
   };
@@ -620,6 +653,6 @@ module.exports = {
     deleteVendor,
     deactivateVendor,
     editDiscoPricing,
-    rejectCustomerVerification,
+    rejectCustomer,
     logoutAdmin
      };

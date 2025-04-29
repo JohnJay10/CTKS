@@ -8,7 +8,8 @@ const {
     fetchTokens,
     getIssuedTokenCount,
     getPaymentTransactionHistory,
-    requesthistory
+    requesthistory,
+    tokenrequesthistory
 } = require('../controllers/tokenController');
 const { requestToken,confirmPayment,cancelPayment   } = require('../controllers/tokenRequestController');
 const auth = require('../middleware/authMiddleware');
@@ -26,6 +27,7 @@ router.get('/fetchtoken', auth(['vendor']), fetchTokens);
 router.get('/issuedtokencount', auth(['vendor']), getIssuedTokenCount);
 
 router.get('/requesthistory', auth(['vendor']), requesthistory);
+router.get('/tokenrequesthistory', auth(['vendor']), tokenrequesthistory);
 
 
 

@@ -9,13 +9,36 @@ const { v4: uuidv4 } = require('uuid');
 // Admin: Get all pending token requests
 const getTokenRequests = async (req, res) => {
   try {
-    const requests = await TokenRequest.find({ status: 'pending' })
-      .populate('vendorId', 'name email approved')
-      .sort({ createdAt: -1 });
+    const { status = 'pending', page = 1, limit = 5 } = req.query;
+    const statuses = status.split(',');
+    
+    // Convert page and limit to numbers
+    const pageNumber = parseInt(page);
+    const limitNumber = parseInt(limit);
+    
+    // Calculate skip value for pagination
+    const skip = (pageNumber - 1) * limitNumber;
+    
+    // Get total count for pagination info
+    const total = await TokenRequest.countDocuments({ status: { $in: statuses } });
+    
+    const requests = await TokenRequest.find({ 
+      status: { $in: statuses }
+    })
+    .populate('vendorId', 'name email approved')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limitNumber);
 
     res.status(200).json({
       success: true,
-      data: requests
+      data: requests,
+      pagination: {
+        page: pageNumber,
+        limit: limitNumber,
+        total,
+        totalPages: Math.ceil(total / limitNumber)
+      }
     });
   } catch (error) {
     console.error('Error fetching token requests:', error);
@@ -32,8 +55,11 @@ const approveTokenRequest = async (req, res) => {
     const { requestId } = req.params;
     
     const request = await TokenRequest.findOneAndUpdate(
-      { _id: requestId, status: 'pending' }, // Only approve pending requests
-      { status: 'approved' },
+      { _id: requestId, status: 'pending' },
+      { 
+        status: 'approved',
+        approvedAt: new Date()  // Add approval timestamp
+      },
       { new: true }
     ).populate('vendorId', 'name email');
 
@@ -62,37 +88,48 @@ const approveTokenRequest = async (req, res) => {
 const rejectTokenRequest = async (req, res) => {
   try {
     const { requestId } = req.params;
-    const { rejectionReason } = req.body; // Get reason from request body
+    const { rejectionReason } = req.body;
 
-    // Find and update the request
+    // Find and update the request - now includes 'approved' status
     const rejectedRequest = await TokenRequest.findOneAndUpdate(
       {
         _id: requestId,
-        status: 'pending' // Only reject pending requests
+        status: { $in: ['pending', 'approved'] } // Can reject either status
       },
       {
         status: 'rejected',
         rejectionReason,
         rejectedAt: new Date(),
-        $inc: { __v: 1 } // Optional: increment version if you're using optimistic concurrency
+        $inc: { __v: 1 }
       },
       {
-        new: true, // Return the updated document
-        runValidators: true // Run schema validations on update
+        new: true,
+        runValidators: true
       }
     ).populate('vendorId', 'name email');
 
     if (!rejectedRequest) {
       return res.status(404).json({
         success: false,
-        message: 'Pending token request not found or already processed'
+        message: 'Token request not found, already processed, or not in a rejectable state'
       });
     }
 
-    // Here you might want to:
-    // 1. Send notification to vendor
-    // 2. Log the rejection
-    // 3. Trigger any other business logic
+    // Additional business logic for approved requests
+    if (rejectedRequest.status === 'approved') {
+      // Here you might want to:
+      // 1. Release any reserved funds/units
+      // 2. Send specific notification for approved->rejected transition
+      // 3. Log additional details
+    }
+
+    // Common notification/logging for all rejections
+    await sendRejectionNotification(rejectedRequest.vendorId.email, {
+      requestId: rejectedRequest._id,
+      meterNumber: rejectedRequest.meterNumber,
+      rejectionReason,
+      rejectedAt: rejectedRequest.rejectedAt
+    });
 
     res.status(200).json({
       success: true,
@@ -108,27 +145,55 @@ const rejectTokenRequest = async (req, res) => {
     });
   }
 };
+
+// Helper function example
+const sendRejectionNotification = async (vendorEmail, rejectionDetails) => {
+  // Implementation for sending email/notification
+  try {
+    await emailService.send({
+      to: vendorEmail,
+      subject: 'Token Request Rejected',
+      template: 'request-rejected',
+      data: rejectionDetails
+    });
+  } catch (err) {
+    console.error('Failed to send rejection notification:', err);
+    // Don't fail the main request if notification fails
+  }
+};
 // Updated issueTokenToVendor
 const issueTokenToVendor = async (req, res) => {
-  const { tokenValue, meterNumber, vendorId } = req.body;
+  const { tokenValue, meterNumber, vendorId, requestId } = req.body;
   const adminId = req.user._id;
 
   try {
-    // 1. Validate input
-    if (!tokenValue || !meterNumber) {
+    // Validate input
+    if (!tokenValue || !meterNumber || !requestId) {
       return res.status(400).json({
-        message: 'Token value and meter number are required'
+        message: 'Token value, meter number and request ID are required'
       });
     }
 
-    // 2. Validate token format
+    // Validate token format
     if (!/^\d{16,45}$/.test(tokenValue)) {
       return res.status(400).json({
         message: 'Token must be 16-45 digits',
       });
     }
 
-    // 3. Verify vendor exists and is approved
+    // Verify the request exists and is approved
+    const request = await TokenRequest.findOne({
+      _id: requestId,
+      status: 'approved'
+    });
+
+    if (!request) {
+      return res.status(404).json({ 
+        message: 'Approved request not found or already processed' 
+      });
+    }
+
+    // Verify vendor exists and is approved
     const vendor = await Vendor.findById(vendorId);
     if (!vendor || !vendor.approved) {
       return res.status(403).json({ 
@@ -136,20 +201,7 @@ const issueTokenToVendor = async (req, res) => {
       });
     }
 
-    // 4. Get the approved request
-    const request = await TokenRequest.findOne({ 
-      meterNumber,
-      vendorId,
-      status: 'approved' // Changed from 'pending' to 'approved'
-    }).sort({ createdAt: -1 });
-
-    if (!request) {
-      return res.status(404).json({ 
-        message: 'No approved request found for this meter' 
-      });
-    }
-
-    // 5. Create token record
+    // Create token record
     const token = new Token({
       tokenId: uuidv4(),
       tokenValue,
@@ -165,22 +217,23 @@ const issueTokenToVendor = async (req, res) => {
 
     await token.save();
 
-    // 6. Update request status to completed
+    // Update request status to completed and link token
     const updatedRequest = await TokenRequest.findByIdAndUpdate(
       request._id, 
       { 
         status: 'completed',
-        tokenId: token._id 
+        tokenId: token._id,
+        issuedAt: new Date()
       },
       { new: true }
     );
 
-    // 7. Update vendor's token balance
+    // Update vendor's token balance
     await Vendor.findByIdAndUpdate(vendorId, {
       $inc: { tokenBalance: request.units }
     });
 
-    // 8. Send notification
+    // Send notification
     await sendTokenNotification(vendor.email, {
       tokenId: token.tokenId,
       meterNumber,
@@ -339,6 +392,48 @@ const requesthistory = async (req, res) => {
   }
 };
 
+const tokenrequesthistory = async (req, res) => {
+  try {
+    // Extract pagination parameters from query
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+
+    // Query for only pending and rejected tokens
+    const tokens = await Token.find({ 
+      vendorId: req.user._id,
+      status: { $in: ['issued'] } // Only fetch pending or rejected tokens
+    })
+    .sort({ createdAt: -1 }) // Sort by newest first
+    .skip(skip)
+    .limit(limit)
+    .select('-__v'); // exclude __v field from response
+
+    // Get total count for pagination
+    const total = await Token.countDocuments({
+      vendorId: req.user._id,
+      status: { $in: ['issued'] }
+    });
+
+    res.status(200).json({
+      success: true,
+      data: tokens,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching tokens:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch tokens'
+    });
+  }
+};
+
 
 //Get Issued Token Count 
 const getIssuedTokenCount = async (req, res) => {
@@ -380,5 +475,6 @@ module.exports = {
   fetchTokens,
   getIssuedTokenCount,
   getPaymentTransactionHistory,
-  requesthistory
+  requesthistory,
+  tokenrequesthistory
 };
