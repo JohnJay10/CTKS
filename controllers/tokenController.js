@@ -3,7 +3,6 @@ const Vendor = require('../models/Vendor');
 const Customer = require('../models/Customer');
 const DiscoPricing = require('../models/DiscoPricing');
 const TokenRequest = require('../models/TokenRequest');
-const { sendTokenNotification } = require('../services/notificationService');
 const { v4: uuidv4 } = require('uuid');
 
 // Admin: Get all pending token requests
@@ -174,12 +173,18 @@ const issueTokenToVendor = async (req, res) => {
       });
     }
 
-    // 2. Validate token format
-    if (!/^\d{16,45}$/.test(tokenValue)) {
-      return res.status(400).json({
-        message: 'Token must be 16-45 digits',
-      });
-    }
+       // 2. Validate token format (updated to allow hyphens)
+       const digitsOnly = tokenValue.replace(/-/g, '');
+       if (!/^[\d-]+$/.test(tokenValue)) {
+         return res.status(400).json({
+           message: 'Token can only contain numbers and hyphens',
+         });
+       }
+       if (digitsOnly.length < 16 || digitsOnly.length > 45) {
+         return res.status(400).json({
+           message: 'Token must have 16-45 digits (hyphens ignored)',
+         });
+       }
 
     // 3. Get the approved request with populated vendor data
     const request = await TokenRequest.findOne({ 
@@ -233,14 +238,7 @@ const issueTokenToVendor = async (req, res) => {
       $inc: { tokenBalance: request.units }
     });
 
-    // 8. Send notification
-    await sendTokenNotification(request.vendorId.email, {
-      tokenId: token.tokenId,
-      meterNumber,
-      units: request.units,
-      amount: request.amount,
-      expiryDate: token.expiryDate
-    });
+    
 
     res.status(201).json({
       success: true,
@@ -262,28 +260,29 @@ const issueTokenToVendor = async (req, res) => {
 };
 
 
+
+
+
+
 const getPaymentTransactionHistory = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 5;
     const skip = (page - 1) * limit;
     const vendorId = req.query.vendorId;
-    const meterNumber = req.query.meterNumber; // New meterNumber search parameter
+    const meterNumber = req.query.meterNumber;
 
     // Build the base query
     const query = {};
 
-    // If vendorId is provided, add to query
     if (vendorId) {
       query.vendorId = vendorId;
     }
 
-    // If meterNumber is provided, add to query with case-insensitive regex search
     if (meterNumber) {
       query.meterNumber = { $regex: meterNumber, $options: 'i' };
     }
 
-    // Fetch tokens with pagination and filtering
     const [tokens, total] = await Promise.all([
       Token.find(query)
         .skip(skip)
@@ -294,10 +293,11 @@ const getPaymentTransactionHistory = async (req, res) => {
       Token.countDocuments(query)
     ]);
 
-    // Format the response
+    // Format the response - ADD tokenValue HERE
     const formattedTokens = tokens.map(token => ({
       _id: token._id,
       tokenId: token.tokenId,
+      tokenValue: token.tokenValue, // Add this line to include the token value
       meterNumber: token.meterNumber,
       vendor: {
         _id: token.vendorId?._id,
@@ -306,7 +306,7 @@ const getPaymentTransactionHistory = async (req, res) => {
         name: token.vendorId?.name
       },
       disco: token.disco,
-      units: token.units,
+      units: token.units,   
       amount: token.amount,
       status: token.status || 'pending',
       createdAt: token.createdAt,
@@ -331,34 +331,31 @@ const getPaymentTransactionHistory = async (req, res) => {
     });
   }
 };
+// In your backend route (e.g., /tokens/fetchtoken)
 const fetchTokens = async (req, res) => {
   try {
-    // Get page number from query params, default to 1 if not provided
     const page = parseInt(req.query.page) || 1;
-    const limit = 5; // 5 tokens per page
-    const skip = (page - 1) * limit;
-
-    // Get total count of tokens for pagination info
-    const totalTokens = await Token.countDocuments({ vendorId: req.user._id });
-
-    const tokens = await Token.find({ vendorId: req.user._id })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .select('-__v'); // exclude __v field from response
+    const limit = parseInt(req.query.limit) || 100; // Higher default limit
+    
+    const tokens = await Token.find({
+      vendorId: req.user._id,
+      status: 'issued'
+    })
+    .sort({ createdAt: -1 })
+    .skip((page - 1) * limit)
+    .limit(limit)
+    .lean(); // Better performance
 
     res.status(200).json({
       success: true,
-      data: tokens,
+      data: tokens, // Ensure this matches frontend expectation
       pagination: {
-        currentPage: page,
-        totalPages: Math.ceil(totalTokens / limit),
-        totalTokens,
-        tokensPerPage: limit
+        page,
+        limit,
+        total: await Token.countDocuments({ vendorId: req.user._id, status: 'issued' })
       }
     });
   } catch (error) {
-    console.error('Error fetching tokens:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch tokens'
@@ -477,6 +474,56 @@ const getIssuedTokenCount = async (req, res) => {
   }    
 };
 
+
+const fetchTokenByMeterNumber = async (req, res) => {
+  try {
+    const { meterNumber } = req.params; // Get meterNumber from URL params
+    const { includeVerification = 'true' } = req.query;
+
+    // Fetch the token
+    const token = await Token.findOne({ meterNumber })
+      .populate('vendorId', 'username name') // Include vendor details
+      .lean();
+
+    if (!token) {
+      return res.status(404).json({
+        success: false,
+        message: 'Token not found'
+      });
+    }
+
+    // Fetch verification details if requested
+    let verificationData = {};
+    if (includeVerification === 'true') {
+      const customer = await Customer.findOne(
+        { meterNumber },
+        { verification: 1, disco: 1 }
+      ).lean();
+      
+      verificationData = customer?.verification || {};
+      token.disco = customer?.disco || token.disco;
+    }
+
+    const responseData = {
+      ...token,
+      verification: verificationData
+    };
+
+    res.status(200).json({
+      success: true,
+      data: responseData
+    });
+
+  } catch (error) {
+    console.error('Error fetching token details:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch token details',
+      error: error.message
+    });
+  }
+};
+
 // Helper function to generate electricity token
 function generateElectricityToken() {
   const randomPart = Math.floor(100000000000 + Math.random() * 900000000000);
@@ -492,5 +539,6 @@ module.exports = {
   getIssuedTokenCount,
   getPaymentTransactionHistory,
   requesthistory,
-  tokenrequesthistory
+  tokenrequesthistory,
+  fetchTokenByMeterNumber
 };
