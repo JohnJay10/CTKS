@@ -7,7 +7,7 @@ const { registerAdmin,
        verifyCustomer, 
        getTokenRequestCount,
     getPendingVendorCount,
-    getCustomerVerificationCount, 
+    getPendingCustomerVerificationCount, 
     getAllDiscoPricing, 
     getAllVendors, 
     getAllCustomers,
@@ -18,8 +18,22 @@ const { registerAdmin,
     deactivateVendor,
     editDiscoPricing,
     rejectCustomer,
-    logoutAdmin
+    logoutAdmin,
+    getCustomersCount,
+    getVerifiedCustomersCount,
+    getIssuedTokenCount,
+    getTotalTokensAmount,
+     getDailyTokenCount,
+        getMonthlyTokenCount,
+        getRevenueTrends,
+        getCustomerTrends,
+        getTokenTrends,
+        getCustomerDistribution,
+        getSalesReport,
+        getPendingUpgrades,
+        CompleteUpgrade
 } = require('../controllers/adminController');
+
 const auth = require('../middleware/authMiddleware');
 const router = express.Router();
 
@@ -69,6 +83,33 @@ router.put('/customers/:customerId/reject', auth(['admin']), rejectCustomer);
 
 router.get('/token-request-count', auth(['admin']), getTokenRequestCount); 
 router.get('/pending-vendor-count', auth(['admin']), getPendingVendorCount);
-router.get('/customer-verification-count', auth(['admin']), getCustomerVerificationCount);
+router.get('/pending-customers-verification', auth(['admin']), getPendingCustomerVerificationCount);
+router.get('/verified-customers-count', auth(['admin']), getVerifiedCustomersCount);
+router.get('/issued-token-count', auth(['admin']), getIssuedTokenCount);
+router.get('/total-tokens-amount', auth(['admin']), getTotalTokensAmount);
+
+router.get('/daily-token-count', auth(['admin']), getDailyTokenCount);
+router.get('/monthly-token-count', auth(['admin']), getMonthlyTokenCount);
+
+//Trends
+router.get('/revenue-trends', auth(['admin']), getRevenueTrends);
+router.get('/customer-trends', auth(['admin']), getCustomerTrends);   
+router.get('/token-trends', auth(['admin']), getTokenTrends);
+router.get('/customer-distribution', auth(['admin']), getCustomerDistribution);
+
+
+router.get('/sales-report', auth(['admin']), getSalesReport);
+
+//Get pending upgrades
+router.get('/pending-upgrades', auth(['admin']), getPendingUpgrades);
+
+router.patch('/complete/:vendorId/:upgradeId', auth(['admin']), CompleteUpgrade);
+
+
+
+
+
+
+router.get('/customers/stats', auth(['admin']), getCustomersCount);
 
 module.exports = router;

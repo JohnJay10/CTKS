@@ -23,11 +23,15 @@
     "expo-sharing": "~13.0.1",
     "express": "^4.21.2",
     "flutterwave-node-v3": "^1.1.15",
+    "html2canvas": "^1.4.1",
     "jsonwebtoken": "^9.0.2",
+    "jspdf": "^3.0.1",
+    "moment": "^2.30.1",
     "mongoose": "^8.13.0",
     "nodemailer": "^6.10.0",
     "react-native-render-html": "^6.3.4",
-    "termii-nodejs": "^1.1.2"
+    "termii-nodejs": "^1.1.2",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "nodemon": "^3.1.9"

@@ -10,7 +10,8 @@ const {
     getPaymentTransactionHistory,
     requesthistory,
     tokenrequesthistory,
-    fetchTokenByMeterNumber
+    fetchTokenByMeterNumber,
+    reissueToken
     
 } = require('../controllers/tokenController');
 const { requestToken,confirmPayment,cancelPayment   } = require('../controllers/tokenRequestController');
@@ -24,6 +25,10 @@ router.post('/admin/issue', auth(['admin']), issueTokenToVendor);
 // Get payment transaction history
 router.get('/admin/all-tokens', auth(['admin']), getPaymentTransactionHistory);
 router.get('/admin/token/:meterNumber', auth(['admin']), fetchTokenByMeterNumber);
+
+router.put('/admin/reissue/:id', auth(['admin']), reissueToken);  
+
+
 
 // Vendor routes
 router.get('/fetchtoken', auth(['vendor']), fetchTokens);

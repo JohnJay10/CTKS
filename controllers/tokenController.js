@@ -524,6 +524,75 @@ const fetchTokenByMeterNumber = async (req, res) => {
   }
 };
 
+
+// controllers/tokenController.js
+const reissueToken = async (req, res) => {
+  try {
+    const { id } = req.params; // Changed from tokenId to id
+    const { tokenValue, meterNumber, reason } = req.body;
+
+    // Validate required fields
+    if (!tokenValue || !meterNumber) {
+      return res.status(400).json({
+        success: false,
+        message: 'Token value and meter number are required'
+      });
+    }
+
+    // Find the existing token by _id
+    const existingToken = await Token.findById(id);
+    if (!existingToken) {
+      return res.status(404).json({
+        success: false,
+        message: 'Token not found'
+      });
+    }
+
+    // Validate token value format
+    const digitsOnly = tokenValue.replace(/-/g, '');
+    if (digitsOnly.length < 16 || digitsOnly.length > 45) {
+      return res.status(400).json({
+        success: false,
+        message: 'Token must contain 16-45 digits'
+      });
+    }
+
+    // Create new token document (don't update existing one)
+    
+    const newToken = new Token({
+      ...existingToken.toObject(),
+      _id: undefined, // Let MongoDB generate new _id
+      tokenId: uuidv4(), // ← Generate new UUID for tokenId
+      tokenValue,       // New token value
+      status: 'issued',
+      isReissued: true,
+      originalToken: existingToken._id,
+      reissueReason: reason,
+      reissuedAt: new Date()
+    });
+    // Update original token status
+    existingToken.status = 'issued';
+    await existingToken.save();
+
+    // Save new token
+    const savedToken = await newToken.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Token reissued successfully',
+      data: savedToken
+    });
+
+  } catch (error) {
+    console.error('Error reissuing token:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to reissue token',
+      error: error.message
+    });
+  }
+};
+
 // Helper function to generate electricity token
 function generateElectricityToken() {
   const randomPart = Math.floor(100000000000 + Math.random() * 900000000000);
@@ -540,5 +609,6 @@ module.exports = {
   getPaymentTransactionHistory,
   requesthistory,
   tokenrequesthistory,
-  fetchTokenByMeterNumber
-};
+  fetchTokenByMeterNumber,
+  reissueToken,
+};  

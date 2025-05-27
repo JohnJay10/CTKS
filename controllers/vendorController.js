@@ -64,21 +64,20 @@ const loginVendor = async (req, res) => {
 
 
 //Add Customers (Vendor Only )
-
 const addCustomer = async (req, res) => {
     try {
         const { meterNumber, disco, lastToken } = req.body;
         const vendorId = req.user._id;
 
-        // 1. Input validation (matches model requirements)
-        if (!meterNumber || !disco) { // lastToken is not required in model
+        // Input validation
+        if (!meterNumber || !disco) {
             return res.status(400).json({ 
                 message: 'Meter number and disco are required',
                 requiredFields: ['meterNumber', 'disco']
             });   
         }
 
-        // 2. Verify vendor exists and is approved
+        // Verify vendor exists and is approved
         const vendor = await Vendor.findById(vendorId);
         if (!vendor) {
             return res.status(404).json({ message: 'Vendor account not found' });
@@ -87,7 +86,29 @@ const addCustomer = async (req, res) => {
             return res.status(403).json({ message: 'Vendor account not approved' });
         }
 
-        // 3. Check for duplicate meter number (globally unique per model)
+        // Check customer limit (automatically applies any pending upgrades)
+        const customerCount = await Customer.countDocuments({ vendorId });
+        const effectiveLimit = vendor.getEffectiveCustomerLimit();
+
+        if (customerCount >= effectiveLimit) {
+            // Check if there are pending approved upgrades that need to be applied
+            const hasPendingUpgrades = vendor.completedUpgrades.some(u => u.status === 'completed');
+            
+            if (hasPendingUpgrades) {
+                await vendor.applyUpgrades();
+                return addCustomer(req, res); // Retry after applying upgrades
+            }
+
+            return res.status(403).json({
+                message: `You've reached your limit of ${effectiveLimit} customers`,
+                code: 'CUSTOMER_LIMIT_REACHED',
+                currentCount: customerCount,
+                limit: effectiveLimit,
+                requiresUpgrade: true
+            });
+        }
+
+        // Check for duplicate meter number
         const existingCustomer = await Customer.findOne({ meterNumber });
         if (existingCustomer) {
             return res.status(409).json({
@@ -99,20 +120,18 @@ const addCustomer = async (req, res) => {
             });
         }
 
-        // 4. Create customer (aligned with model schema)
+        // Create customer
         const customer = new Customer({
             meterNumber,
             disco,
-            lastToken, // optional based on model
+            lastToken,
             vendorId,
-            verification: { // Initialize verification fields
-                isVerified: false 
-            }
+            verification: { isVerified: false }
         });
 
         await customer.save();
 
-        // 5. Return response (excluding sensitive fields)
+        // Return success response
         return res.status(201).json({
             message: 'Customer registered successfully',
             customer: {
@@ -122,13 +141,14 @@ const addCustomer = async (req, res) => {
                 status: customer.verification.isVerified ? 'verified' : 'pending',
                 vendorId: customer.vendorId,
                 createdAt: customer.createdAt
-            }
+            },
+            customerCount: customerCount + 1,
+            customerLimit: vendor.customerLimit
         });
 
     } catch (error) {
         console.error('Customer registration error:', error);
-
-        // Handle duplicate key error separately
+        
         if (error.code === 11000 && error.keyPattern.meterNumber) {
             return res.status(409).json({
                 message: 'Meter number must be unique across all vendors',
@@ -136,7 +156,6 @@ const addCustomer = async (req, res) => {
             });
         }
 
-        // Handle validation errors
         if (error.name === 'ValidationError') {
             const errors = Object.values(error.errors).map(err => err.message);
             return res.status(400).json({
@@ -151,6 +170,128 @@ const addCustomer = async (req, res) => {
         });
     }
 };
+
+
+//Get Count of Customers by vendor
+// controllers/vendorController.js
+const getVendorLimits = async (req, res) => {
+    try {
+        const vendorId = req.user._id;
+        const vendor = await Vendor.findById(vendorId)
+            .select('customerLimit pendingUpgrades completedUpgrades');
+
+        if (!vendor) {
+            return res.status(404).json({ message: 'Vendor not found' });
+        }
+
+        const customerCount = await Customer.countDocuments({ vendorId });
+        const effectiveLimit = vendor.getEffectiveCustomerLimit();
+
+        return res.status(200).json({
+            data: {  // Add this wrapper to match your frontend expectation
+                customerLimit: effectiveLimit,  // Return effectiveLimit instead of customerLimit
+                customerCount,
+                pendingUpgrade: vendor.pendingUpgrades && vendor.pendingUpgrades.length > 0
+            }
+        });
+
+    } catch (error) {
+        console.error('Get vendor limits error:', error);
+        return res.status(500).json({ message: 'Failed to get vendor limits' });
+    }
+};
+
+
+// upgrade.controller.js
+const initiateUpgrade = async (req, res) => {
+    try {
+        const { additionalCustomers } = req.body;
+        const vendorId = req.user._id;
+
+        if (!additionalCustomers || additionalCustomers < 5) {
+            return res.status(400).json({ message: 'Minimum upgrade is 5 additional customers' });
+        }
+
+        const amount = additionalCustomers * 2000; // ₦2000 per customer
+        const reference = `UPG-${Date.now()}-${vendorId.toString().slice(-4)}`;
+
+        const vendor = await Vendor.findByIdAndUpdate(
+            vendorId,
+            {
+                $push: {
+                    pendingUpgrades: {
+                        additionalCustomers,
+                        amount,
+                        reference,
+                        status: 'pending_verification'
+                    }
+                }
+            },
+            { new: true }
+        );
+
+        return res.status(200).json({
+            message: 'Upgrade request submitted',
+            instructions: {
+                amount,
+                bank: 'Zenith Bank',
+                accountName: 'PowerPay Solutions',
+                accountNumber: '1234567890',
+                reference
+            }
+        });
+
+    } catch (error) {
+        console.error('Upgrade initiation error:', error);
+        return res.status(500).json({ message: 'Failed to initiate upgrade' });
+    }
+};
+  //
+  
+  
+  const submitPaymentProof = async (req, res) => {
+    try {
+      const vendorId = req.user._id;
+      const { requestId, paymentProof } = req.body;
+  
+      if (!requestId || !paymentProof) {
+        return res.status(400).json({
+          message: 'Request ID and payment proof are required',
+          requiredFields: ['requestId', 'paymentProof']
+        });
+      }
+  
+      const vendor = await Vendor.findOneAndUpdate(
+        { 
+          _id: vendorId,
+          'pendingUpgrades._id': requestId 
+        },
+        { 
+          $set: { 
+            'pendingUpgrades.$.paymentProof': paymentProof,
+            'pendingUpgrades.$.status': 'pending_verification' 
+          } 
+        },
+        { new: true }
+      );
+  
+      if (!vendor) {
+        return res.status(404).json({ message: 'Upgrade request not found' });
+      }
+  
+      return res.status(200).json({
+        message: 'Payment proof submitted successfully',
+        status: 'pending_verification'
+      });
+  
+    } catch (error) {
+      console.error('Payment proof submission error:', error);
+      return res.status(500).json({
+        message: 'Failed to submit payment proof',
+        error: error.message
+      });
+    }
+  };
 
 
 // Get all customers
@@ -378,6 +519,10 @@ module.exports = {
      getRecentActivities,
       getActivityAction,
       getPendingVerifications,
-      getAllAccounts
+      getAllAccounts,
+        getVendorLimits,
+        initiateUpgrade,
+        submitPaymentProof
+
     
     };     

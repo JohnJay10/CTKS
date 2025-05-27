@@ -1,5 +1,6 @@
 const express = require('express');
-const { loginVendor, addCustomer, getAllCustomers, getCustomerCount, getPendingRequestCount, getPendingVerifications, getIssuedTokenCount, getRecentActivities,getActivityAction, getAllAccounts} = require('../controllers/vendorController');
+const { loginVendor, addCustomer, getAllCustomers, getCustomerCount, getPendingRequestCount,getVendorLimits, getPendingVerifications, getIssuedTokenCount, getRecentActivities,getActivityAction, getAllAccounts, initiateUpgrade,
+        submitPaymentProof} = require('../controllers/vendorController');
 const {getAllDiscoPricing } = require('../controllers/adminController');
 
 const auth = require('../middleware/authMiddleware');
@@ -44,6 +45,15 @@ router.get('/getActivityAction/:activityId', auth(['vendor']), getActivityAction
 
 //Get All Bank Accounts 
 router.get('/default', auth(['vendor']), getAllAccounts);
+
+
+//Get Vendor Limits
+router.get('/getVendorLimits', auth(['vendor']), getVendorLimits);
+
+//Initiate Upgrade
+router.post('/initiateUpgrade', auth(['vendor']), initiateUpgrade);
+//Submit Payment Proof
+router.post('/submitPaymentProof/:upgradeId', auth(['vendor']), submitPaymentProof);
 
 
 

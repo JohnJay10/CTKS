@@ -4,6 +4,10 @@ const Customer = require('../models/Customer');
 const DiscoPricing = require('../models/DiscoPricing');
 const TokenRequest = require('../models/TokenRequest');
 const generateToken = require('../utils/generateToken');
+const Token = require('../models/Token');
+const moment = require('moment');
+const mongoose = require('mongoose');
+
 
 
 //Register an Admin
@@ -270,6 +274,17 @@ const getAllCustomers = async (req, res) => {
 };
 
 
+//Get All Customers Count
+
+const getCustomersCount = async (req, res) => {
+    try {
+        const count = await Customer.countDocuments();
+        return res.status(200).json({ count });
+    } catch (error) {
+        return res.status(500).json({ message: error.message });
+    }
+};
+
 const verifyCustomer = async (req, res) => {
     const { customerId } = req.params; // Get from URL parameters
     const { KRN, SGC, TI, MSN, MTK1, MTK2, RTK1, RTK2 } = req.body;
@@ -532,7 +547,7 @@ const  getPendingVendorCount = async (req, res) => {
     }
 };
 
-const getCustomerVerificationCount = async (req, res) => {
+const getPendingCustomerVerificationCount = async (req, res) => {
     try {
         const { status = 'pending' } = req.query;
         
@@ -552,6 +567,25 @@ const getCustomerVerificationCount = async (req, res) => {
     }
 };
 
+
+//Get Verified Customers Count 
+const getVerifiedCustomersCount = async (req, res) => {
+    try {
+        const verifiedCount = await Customer.countDocuments({ 
+            "verification.isVerified": true 
+        });
+        
+        return res.status(200).json({ 
+            count: verifiedCount 
+        });
+    } catch (error) {
+        return res.status(500).json({ 
+            message: error.message || "Failed to get verified customer count" 
+        });
+    }
+};
+
+
 const getTokenRequestCount = async (req, res) => {
     try {
         // Count only documents with status 'pending'
@@ -562,6 +596,151 @@ const getTokenRequestCount = async (req, res) => {
     }
 }; 
 
+//Get Issued Token Count 
+const getIssuedTokenCount = async (req, res) => {
+    try {
+        // Count only documents with status 'issued'
+        const issuedTokenRequests = await Token.countDocuments({ status: 'issued' });
+        return res.status(200).json({ count: issuedTokenRequests });
+    } catch (error) {
+        return res.status(500).json({ message: error.message });
+    }
+};
+
+
+//Get Count for daily revenue based on Amount 
+const getTotalTokensAmount = async (req, res) => {
+    try {
+      // Using MongoDB aggregation pipeline
+      const aggregationResult = await Token.aggregate([
+        {
+          $match: { 
+            status: 'issued',
+            // Add any other filters you need
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalAmount: { $sum: '$amount' },
+            totalTokens: { $sum: 1 }
+          }
+        }
+      ]);
+  
+      // Extract results or default to 0
+      const result = aggregationResult.length > 0 
+        ? aggregationResult[0] 
+        : { totalAmount: 0, totalTokens: 0 };
+  
+      res.status(200).json({
+        success: true,
+        data: {
+          totalAmount: result.totalAmount,
+          totalTokens: result.totalTokens,
+          // You can add formatted versions here if needed
+          formattedAmount: `₦${result.totalAmount.toLocaleString()}`,
+        }
+      });
+  
+    } catch (error) {
+      console.error('Error calculating token amounts:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error calculating token statistics',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  };                    
+
+
+  // Daily token count
+const getDailyTokenCount = async (req, res) => {
+    try {
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0); // Start of today
+  
+      const result = await Token.aggregate([
+        {
+          $match: {
+            status: 'issued',
+            createdAt: { $gte: startOfDay }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            count: { $sum: 1 },
+            totalAmount: { $sum: '$amount' }
+          }
+        }
+      ]);
+  
+      const data = result.length > 0 ? result[0] : { count: 0, totalAmount: 0 };
+  
+      res.status(200).json({
+        success: true,
+        data: {
+          count: data.count,
+          totalAmount: data.totalAmount,
+          formattedAmount: `${data.totalAmount.toLocaleString()}`
+        }
+      });
+  
+    } catch (error) {
+      console.error('Error fetching daily tokens:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching daily token count'
+      });
+    }
+  };
+  
+  // Monthly token count
+  const getMonthlyTokenCount = async (req, res) => {
+    try {
+      const startOfMonth = new Date();
+      startOfMonth.setDate(1); // First day of current month
+      startOfMonth.setHours(0, 0, 0, 0);
+  
+      const result = await Token.aggregate([
+        {
+          $match: {
+            status: 'issued',
+            createdAt: { $gte: startOfMonth }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            count: { $sum: 1 },
+            totalAmount: { $sum: '$amount' }
+          }
+        }
+      ]);
+  
+      const data = result.length > 0 ? result[0] : { count: 0, totalAmount: 0 };
+  
+      res.status(200).json({
+        success: true,
+        data: {
+          count: data.count,
+          totalAmount: data.totalAmount,
+          formattedAmount: `${data.totalAmount.toLocaleString()}`
+        }
+      });
+  
+    } catch (error) {
+      console.error('Error fetching monthly tokens:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching monthly token count'
+      });
+    }
+  };
+
+
+        
 
 const rejectCustomer = async (req, res) => {
     try {
@@ -630,9 +809,611 @@ const rejectCustomer = async (req, res) => {
   };
     
   
+  const getRevenueTrends = async (req, res) => {
+    try {
+      const { range: period } = req.query; // 'day', 'week', or 'month'
+      
+      let groupBy, dateFormat, startDate;
+      
+      // Set parameters based on period
+      switch (period) {
+        case 'day':
+          startDate = moment().subtract(30, 'days').toDate(); // Last 30 days
+          groupBy = { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } };
+          dateFormat = 'MMM D';
+          break;
+          
+        case 'week':
+          startDate = moment().subtract(12, 'weeks').toDate(); // Last 12 weeks
+          groupBy = { 
+            year: { $year: '$createdAt' },
+            week: { $week: '$createdAt' }
+          };
+          dateFormat = 'MMM D';
+          break;
+          
+        case 'month':
+          startDate = moment().subtract(12, 'months').toDate(); // Last 12 months
+          groupBy = { 
+            year: { $year: '$createdAt' },
+            month: { $month: '$createdAt' }
+          };
+          dateFormat = 'MMM YYYY';
+          break;
+          
+        default:
+          return res.status(400).json({ 
+            success: false,
+            message: 'Invalid period specified'
+          });
+      }
+  
+      const pipeline = [
+        {
+          $match: {
+            status: 'issued',
+            createdAt: { $gte: startDate }
+          }
+        },
+        {
+          $group: {
+            _id: groupBy,
+            totalAmount: { $sum: '$amount' },
+            count: { $sum: 1 }
+          }
+        },
+        {
+          $sort: { '_id': 1 }
+        }
+      ];
+  
+      const results = await Token.aggregate(pipeline);
+  
+      // Format the results for the chart
+      const formattedResults = results.map(item => {
+        let periodLabel;
+        
+        if (period === 'week') {
+          periodLabel = moment()
+            .year(item._id.year)
+            .week(item._id.week)
+            .startOf('week')
+            .format(dateFormat);
+        } else if (period === 'month') {
+          periodLabel = moment()
+            .year(item._id.year)
+            .month(item._id.month - 1)
+            .format(dateFormat);
+        } else {
+          periodLabel = moment(item._id).format(dateFormat);
+        }
+        
+        return {
+          period: periodLabel,
+          amount: item.totalAmount,
+          count: item.count
+        };
+      });
+  
+      res.status(200).json({
+        success: true,
+        data: formattedResults
+      });
+  
+    } catch (error) {
+      console.error('Error fetching revenue trends:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching revenue trends',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+};
 
 
- 
+
+const getCustomerTrends = async (req, res) => {
+    try {
+        const { range: period } = req.query; // 'day', 'week', or 'month'
+        
+        if (!['day', 'week', 'month'].includes(period)) {
+            return res.status(400).json({ 
+                success: false,
+                message: 'Invalid period specified. Use day, week, or month'
+            });
+        }
+
+        // Calculate date ranges
+        const dateRanges = {
+            day: {
+                startDate: moment().subtract(30, 'days').toDate(),
+                groupBy: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+                dateFormat: 'MMM D'
+            },
+            week: {
+                startDate: moment().subtract(12, 'weeks').toDate(),
+                groupBy: { 
+                    year: { $year: '$createdAt' },
+                    week: { $week: '$createdAt' }
+                },
+                dateFormat: 'MMM D'
+            },
+            month: {
+                startDate: moment().subtract(12, 'months').toDate(),
+                groupBy: { 
+                    year: { $year: '$createdAt' },
+                    month: { $month: '$createdAt' }
+                },
+                dateFormat: 'MMM YYYY'
+            }
+        };
+
+        const { startDate, groupBy, dateFormat } = dateRanges[period];
+
+        const pipeline = [
+            {
+                $match: {
+                    createdAt: { $gte: startDate }
+                }
+            },
+            {
+                $facet: {
+                    totalCustomers: [
+                        {
+                            $group: {
+                                _id: groupBy,
+                                count: { $sum: 1 }
+                            }
+                        },
+                        { $sort: { '_id': 1 } }
+                    ],
+                    verifiedCustomers: [
+                        {
+                            $match: {
+                                isVerified: true
+                            }
+                        },
+                        {
+                            $group: {
+                                _id: groupBy,
+                                count: { $sum: 1 }
+                            }
+                        },
+                        { $sort: { '_id': 1 } }
+                    ]
+                }
+            }
+        ];
+
+        const results = await Customer.aggregate(pipeline);
+
+        // Format results for chart
+        const formattedResults = results[0].totalCustomers.map((totalItem, index) => {
+            let periodLabel;
+            
+            if (period === 'week') {
+                periodLabel = moment()
+                    .year(totalItem._id.year)
+                    .week(totalItem._id.week)
+                    .startOf('week')
+                    .format(dateFormat);
+            } else if (period === 'month') {
+                periodLabel = moment()
+                    .year(totalItem._id.year)
+                    .month(totalItem._id.month - 1)
+                    .format(dateFormat);
+            } else {
+                periodLabel = moment(totalItem._id).format(dateFormat);
+            }
+            
+            const verifiedItem = results[0].verifiedCustomers[index] || { count: 0 };
+            
+            return {
+                period: periodLabel,
+                total: totalItem.count,
+                verified: verifiedItem.count
+            };
+        });
+
+        res.status(200).json({
+            success: true,
+            period,
+            data: formattedResults
+        });
+
+    } catch (error) {
+        console.error('Error fetching customer trends:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Server error while fetching customer trends',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+
+
+const getTokenTrends = async (req, res) => {
+    try {
+        const { range: period } = req.query; // 'day', 'week', or 'month'
+        
+        if (!['day', 'week', 'month'].includes(period)) {
+            return res.status(400).json({ 
+                success: false,
+                message: 'Invalid period specified. Use day, week, or month'
+            });
+        }
+
+        // Calculate date ranges
+        const dateRanges = {
+            day: {
+                startDate: moment().subtract(30, 'days').toDate(),
+                groupBy: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+                dateFormat: 'MMM D'
+            },
+            week: {
+                startDate: moment().subtract(12, 'weeks').toDate(),
+                groupBy: { 
+                    year: { $year: '$createdAt' },
+                    week: { $week: '$createdAt' }
+                },
+                dateFormat: 'MMM D'
+            },
+            month: {
+                startDate: moment().subtract(12, 'months').toDate(),
+                groupBy: { 
+                    year: { $year: '$createdAt' },
+                    month: { $month: '$createdAt' }
+                },
+                dateFormat: 'MMM YYYY'
+            }
+        };
+
+        const { startDate, groupBy, dateFormat } = dateRanges[period];
+
+        const pipeline = [
+            {
+                $match: {
+                    createdAt: { $gte: startDate }
+                }
+            },
+            {
+                $facet: {
+                    issuedTokens: [
+                        {
+                            $match: { status: 'issued' }
+                        },
+                        {
+                            $group: {
+                                _id: groupBy,
+                                count: { $sum: 1 },
+                                totalAmount: { $sum: '$amount' }
+                            }
+                        },
+                        { $sort: { '_id': 1 } }
+                    ],
+                    pendingTokens: [
+                        {
+                            $match: { status: 'pending' }
+                        },
+                        {
+                            $group: {
+                                _id: groupBy,
+                                count: { $sum: 1 }
+                            }
+                        },
+                        { $sort: { '_id': 1 } }
+                    ]
+                }
+            }
+        ];
+
+        const results = await Token.aggregate(pipeline);
+
+        // Format results for chart
+        const formattedResults = results[0].issuedTokens.map((issuedItem, index) => {
+            let periodLabel;
+            
+            if (period === 'week') {
+                periodLabel = moment()
+                    .year(issuedItem._id.year)
+                    .week(issuedItem._id.week)
+                    .startOf('week')
+                    .format(dateFormat);
+            } else if (period === 'month') {
+                periodLabel = moment()
+                    .year(issuedItem._id.year)
+                    .month(issuedItem._id.month - 1)
+                    .format(dateFormat);
+            } else {
+                periodLabel = moment(issuedItem._id).format(dateFormat);
+            }
+            
+            const pendingItem = results[0].pendingTokens[index] || { count: 0 };
+            
+            return {
+                period: periodLabel,
+                issued: issuedItem.count,
+                issuedAmount: issuedItem.totalAmount,
+                pending: pendingItem.count
+            };
+        });
+
+        res.status(200).json({
+            success: true,
+            period,
+            data: formattedResults
+        });
+
+    } catch (error) {
+        console.error('Error fetching token trends:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Server error while fetching token trends',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+
+const getCustomerDistribution = async (req, res) => {
+    try {
+        const results = await Customer.aggregate([
+            {
+                $facet: {
+                    verifiedCustomers: [
+                        {
+                            $match: { isVerified: true }
+                        },
+                        {
+                            $count: "count"
+                        }
+                    ],
+                    pendingCustomers: [
+                        {
+                            $match: { isVerified: false }
+                        },
+                        {
+                            $count: "count"
+                        }
+                    ],
+                    totalCustomers: [
+                        {
+                            $count: "count"
+                        }
+                    ]
+                }
+            },
+            {
+                $project: {
+                    verified: { $ifNull: [{ $arrayElemAt: ["$verifiedCustomers.count", 0] }, 0] },
+                    pending: { $ifNull: [{ $arrayElemAt: ["$pendingCustomers.count", 0] }, 0] },
+                    total: { $ifNull: [{ $arrayElemAt: ["$totalCustomers.count", 0] }, 0] }
+                }
+            }
+        ]);
+
+        const distribution = results[0] || { verified: 0, pending: 0, total: 0 };
+
+        res.status(200).json({
+            success: true,
+            data: {
+                verified: distribution.verified,
+                pending: distribution.pending,
+                total: distribution.total,
+                verifiedPercentage: distribution.total > 0 
+                    ? Math.round((distribution.verified / distribution.total) * 100) 
+                    : 0,
+                pendingPercentage: distribution.total > 0 
+                    ? Math.round((distribution.pending / distribution.total) * 100) 
+                    : 0
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching customer distribution:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Server error while fetching customer distribution',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+
+//Get Sales Report
+
+const getSalesReport = async (req, res) => {
+    try {
+        const { type = 'daily' } = req.query;
+        
+        let startDate, endDate, groupBy;
+        
+        // Set date ranges and grouping based on report type
+        switch (type.toLowerCase()) {
+          case 'weekly':
+            startDate = moment().startOf('week').toDate();
+            endDate = moment().endOf('week').toDate();
+            groupBy = { $dayOfWeek: '$createdAt' };
+            break;
+          case 'monthly':
+            startDate = moment().startOf('month').toDate();
+            endDate = moment().endOf('month').toDate();
+            groupBy = { $dayOfMonth: '$createdAt' };
+            break;
+          default: // daily
+            startDate = moment().startOf('day').toDate();
+            endDate = moment().endOf('day').toDate();
+            groupBy = { $hour: '$createdAt' };
+        }
+    
+        const reportData = await Token.aggregate([
+          {
+            $match: {
+              status: 'issued', // Only successful transactions
+              createdAt: { $gte: startDate, $lte: endDate }
+            }
+          },
+          {
+            $group: {
+              _id: groupBy,
+              date: { $first: '$createdAt' },
+              tokensIssued: { $sum: 1 },
+              totalAmount: { $sum: '$amount' },
+              successfulTransactions: { $sum: 1 },
+              failedTransactions: { 
+                $sum: { 
+                  $cond: [{ $ne: ['$status', 'success'] }, 1, 0] 
+                } 
+              }
+            }
+          },
+          {
+            $project: {
+              _id: 0,
+              date: {
+                $dateToString: {
+                  format: type === 'monthly' ? '%Y-%m-%d' : 
+                         type === 'weekly' ? '%Y-%m-%d' : '%Y-%m-%d %H:%M',
+                  date: '$date'
+                }
+              },
+              tokensIssued: 1,
+              totalAmount: 1,
+              successfulTransactions: 1,
+              failedTransactions: 1
+            }
+          },
+          { $sort: { date: 1 } }
+        ]);
+    
+        // Format the response
+        const formattedData = reportData.map(item => ({
+          ...item,
+          totalAmount: item.totalAmount,
+          formattedAmount: `₦${item.totalAmount.toLocaleString()}`
+        }));
+    
+        res.status(200).json({
+          success: true,
+          data: formattedData
+        });
+      } catch (error) {
+        console.error('Error generating sales report:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Failed to generate sales report'
+        });
+      }
+}
+
+
+//Get Pending Upgrades 
+const getPendingUpgrades = async (req, res) => {
+    try {
+        // 1. Verify authentication
+        if (!req.user || !req.user._id) {
+            return res.status(401).json({
+                success: false,
+                message: 'Authentication credentials missing'
+            });
+        }
+
+        // 2. Find all vendors with pending upgrades (admin view)
+        const vendorsWithUpgrades = await Vendor.aggregate([
+            { $match: { 'pendingUpgrades.0': { $exists: true } } }, // Vendors with at least one upgrade
+            { $unwind: '$pendingUpgrades' },
+            { $match: { 'pendingUpgrades.status': 'pending' } },
+            { $project: {
+                vendorId: '$_id',
+                businessName: 1,
+                email: 1,
+                upgrade: '$pendingUpgrades',
+                _id: 0
+            }}
+        ]);
+
+        // 3. Format the response
+        const pendingUpgrades = vendorsWithUpgrades.map(item => ({
+            ...item.upgrade,
+            vendorInfo: {
+                id: item.vendorId,
+                businessName: item.businessName,
+                email: item.email
+            }
+        }));
+
+        return res.status(200).json({
+            success: true,
+            count: pendingUpgrades.length,
+            data: pendingUpgrades
+        });
+
+    } catch (error) {
+        console.error('Controller error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            systemError: process.env.NODE_ENV === 'development' ? {
+                message: error.message,
+                stack: error.stack
+            } : undefined
+        });
+    }
+};
+//Complete Upgrade
+
+const CompleteUpgrade = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        const { vendorId, upgradeId } = req.params;
+        const adminId = req.user._id;
+
+        const vendor = await Vendor.findById(vendorId).session(session);
+        if (!vendor) {
+            await session.abortTransaction();
+            return res.status(404).json({ message: 'Vendor not found' });
+        }
+
+        const upgrade = vendor.pendingUpgrades.id(upgradeId);
+        if (!upgrade || upgrade.status !== 'pending_verification') {
+            await session.abortTransaction();
+            return res.status(400).json({ message: 'Invalid upgrade request' });
+        }
+
+        // Move to completed upgrades
+        vendor.completedUpgrades.push({
+            additionalCustomers: upgrade.additionalCustomers,
+            amount: upgrade.amount,
+            approvedAt: new Date(),
+            approvedBy: adminId,
+            status: 'completed'
+        });
+
+        // Remove from pending
+        vendor.pendingUpgrades.pull(upgrade._id);
+
+        await vendor.save({ session });
+        await session.commitTransaction();
+
+        return res.status(200).json({
+            success: true,
+            message: 'Upgrade completed successfully',
+            newCustomerLimit: vendor.customerLimit + upgrade.additionalCustomers
+        });
+
+    } catch (error) {
+        await session.abortTransaction();
+        console.error('Upgrade completion error:', error);
+        return res.status(500).json({ message: 'Failed to complete upgrade' });
+    } finally {
+        session.endSession();
+    }
+};
+
+
 
 module.exports = { 
     registerAdmin,
@@ -646,7 +1427,7 @@ module.exports = {
     getAllDiscoPricing,
     getTokenRequestCount,
     getPendingVendorCount,
-    getCustomerVerificationCount,
+    getPendingCustomerVerificationCount,
     updateVerifiedCustomer,
     deleteCustomer,
     editVendor,
@@ -654,5 +1435,20 @@ module.exports = {
     deactivateVendor,
     editDiscoPricing,
     rejectCustomer,
-    logoutAdmin
+    logoutAdmin,
+    getCustomersCount,
+    getVerifiedCustomersCount,
+    getIssuedTokenCount,
+    getTotalTokensAmount,
+    getDailyTokenCount,
+    getMonthlyTokenCount,
+    getRevenueTrends,
+    getCustomerTrends,
+    getTokenTrends,
+    getCustomerDistribution,
+    getSalesReport,
+    getPendingUpgrades,
+    CompleteUpgrade
+
+
      };
