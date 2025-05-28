@@ -18,7 +18,7 @@ const tokenSchema = new mongoose.Schema({
         enum: ["pending", "issued", "used", "expired"],
         default: "pending"  
     },
-    expiryDate: { type: Date, required: true }
+    expiryDate: { type: Date, required: true }  
 }, { timestamps: true });
 
 module.exports = mongoose.model('Token', tokenSchema);   

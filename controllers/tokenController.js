@@ -262,8 +262,6 @@ const issueTokenToVendor = async (req, res) => {
 
 
 
-
-
 const getPaymentTransactionHistory = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -272,65 +270,106 @@ const getPaymentTransactionHistory = async (req, res) => {
     const vendorId = req.query.vendorId;
     const meterNumber = req.query.meterNumber;
 
-    // Build the base query
-    const query = {};
+    // Build the base query for Token (issued tokens)
+    const tokenQuery = {};
 
-    if (vendorId) {
-      query.vendorId = vendorId;
-    }
+    if (vendorId) tokenQuery.vendorId = vendorId;
+    if (meterNumber) tokenQuery.meterNumber = { $regex: meterNumber, $options: 'i' };
 
-    if (meterNumber) {
-      query.meterNumber = { $regex: meterNumber, $options: 'i' };
-    }
-
-    const [tokens, total] = await Promise.all([
-      Token.find(query)
+    // Fetch issued tokens (Token model)
+    const [issuedTokens, issuedTotal] = await Promise.all([
+      Token.find(tokenQuery)
         .skip(skip)
         .limit(limit)
         .populate('vendorId', 'username email name')
         .populate('issuedBy', 'name email')
         .sort({ createdAt: -1 }),
-      Token.countDocuments(query)
+      Token.countDocuments(tokenQuery),
     ]);
 
-    // Format the response - ADD tokenValue HERE
-    const formattedTokens = tokens.map(token => ({
-      _id: token._id,
-      tokenId: token.tokenId,
-      tokenValue: token.tokenValue, // Add this line to include the token value
-      meterNumber: token.meterNumber,
-      vendor: {
-        _id: token.vendorId?._id,
-        username: token.vendorId?.username,
-        email: token.vendorId?.email,
-        name: token.vendorId?.name
-      },
-      disco: token.disco,
-      units: token.units,   
-      amount: token.amount,
-      status: token.status || 'pending',
-      createdAt: token.createdAt,
-      updatedAt: token.updatedAt,
-      expiryDate: token.expiryDate,
-      issuedBy: token.issuedBy
-    }));
+    const tokenIds = issuedTokens.map(token => token.tokenId);
+    const issuedMeterNumbers = issuedTokens.map(t => t.meterNumber);
+    const issuedVendorIds = issuedTokens.map(t => t.vendorId?._id?.toString());
+
+    // Find matching TokenRequests
+    const tokenRequests = await TokenRequest.find({
+      $or: [
+        { txRef: { $in: tokenIds } },
+        {
+          meterNumber: { $in: issuedMeterNumbers },
+          vendorId: { $in: issuedVendorIds },
+        },
+      ]
+    }).sort({ createdAt: 1 });
+
+    // Build lookup maps
+    const tokenRequestMap = {};
+    const fallbackRequestMap = {};
+
+    tokenRequests.forEach(request => {
+      if (request.txRef) {
+        tokenRequestMap[request.txRef] = request; // exact txRef match
+      }
+
+      const fallbackKey = `${request.meterNumber}_${request.vendorId.toString()}`;
+      if (!fallbackRequestMap[fallbackKey]) {
+        fallbackRequestMap[fallbackKey] = request; // earliest one
+      }
+    });
+
+    const formattedTokens = issuedTokens.map(token => {
+      const tokenId = token.tokenId;
+      const meter = token.meterNumber;
+      const vendor = token.vendorId?._id?.toString();
+
+      // Try exact match
+      let tokenRequest = tokenRequestMap[tokenId];
+
+      // Fallback if not found
+      if (!tokenRequest && meter && vendor) {
+        const fallbackKey = `${meter}_${vendor}`;
+        tokenRequest = fallbackRequestMap[fallbackKey];
+      }
+
+      return {
+        _id: token._id,
+        tokenId: token.tokenId,
+        tokenValue: token.tokenValue,
+        meterNumber: token.meterNumber,
+        vendor: {
+          _id: token.vendorId?._id,
+          username: token.vendorId?.username,
+          email: token.vendorId?.email,
+          name: token.vendorId?.name,
+        },
+        disco: token.disco,
+        units: token.units,
+        amount: token.amount,
+        status: token.status || 'pending',
+        requestDate: tokenRequest?.createdAt || null,
+        issueDate: token.updatedAt,
+        expiryDate: token.expiryDate,
+        issuedBy: token.issuedBy,
+      };
+    });
 
     res.status(200).json({
       success: true,
       data: formattedTokens,
-      total,
-      totalPages: Math.ceil(total / limit),
+      total: issuedTotal,
+      totalPages: Math.ceil(issuedTotal / limit),
       page,
-      limit
+      limit,
     });
   } catch (error) {
     console.error('Error fetching token history:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch token history'
+      message: 'Failed to fetch token history',
     });
   }
 };
+
 // In your backend route (e.g., /tokens/fetchtoken)
 const fetchTokens = async (req, res) => {
   try {
