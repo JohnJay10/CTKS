@@ -1228,7 +1228,7 @@ const getSalesReport = async (req, res) => {
         const { type = 'daily' } = req.query;
         
         let startDate, endDate, groupBy;
-        
+           
         // Set date ranges and grouping based on report type
         switch (type.toLowerCase()) {
           case 'weekly':

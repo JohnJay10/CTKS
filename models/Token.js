@@ -1,9 +1,10 @@
 const mongoose = require('mongoose');
 
 const tokenSchema = new mongoose.Schema({
+     txRef: { type: String, required: true, unique: true },
     tokenId: { type: String, required: true, unique: true },
     tokenValue: { type: String, required: true },
-    meterNumber: { type: String, required: true },
+    meterNumber: { type: String, required: true }, 
     units: { type: Number, required: true },
     amount: { type: Number, required: true },
     disco: { 
@@ -15,7 +16,7 @@ const tokenSchema = new mongoose.Schema({
     issuedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin', required: true },
     status: { 
         type: String, 
-        enum: ["pending", "issued", "used", "expired"],
+        enum: ["pending", "issued", "used", "expired","reissued"],
         default: "pending"  
     },
     expiryDate: { type: Date, required: true }  

@@ -8,7 +8,7 @@ const { v4: uuidv4 } = require('uuid');
 // Admin: Get all pending token requests
 const getTokenRequests = async (req, res) => {
   try {
-    const { status = 'pending', page = 1, limit = 5 } = req.query;
+    const { status = 'pending', page = 1, limit = 10 } = req.query;
     const statuses = status.split(',');
     
     // Convert page and limit to numbers
@@ -210,6 +210,7 @@ const issueTokenToVendor = async (req, res) => {
     const token = new Token({
       tokenId: uuidv4(),
       tokenValue,
+      txRef: request.txRef,   
       meterNumber,
       units: request.units,
       amount: request.amount,
@@ -259,9 +260,6 @@ const issueTokenToVendor = async (req, res) => {
   }
 };
 
-
-
-
 const getPaymentTransactionHistory = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -270,13 +268,12 @@ const getPaymentTransactionHistory = async (req, res) => {
     const vendorId = req.query.vendorId;
     const meterNumber = req.query.meterNumber;
 
-    // Build the base query for Token (issued tokens)
+    // Build base token query
     const tokenQuery = {};
-
     if (vendorId) tokenQuery.vendorId = vendorId;
     if (meterNumber) tokenQuery.meterNumber = { $regex: meterNumber, $options: 'i' };
 
-    // Fetch issued tokens (Token model)
+    // Fetch tokens with pagination
     const [issuedTokens, issuedTotal] = await Promise.all([
       Token.find(tokenQuery)
         .skip(skip)
@@ -287,49 +284,23 @@ const getPaymentTransactionHistory = async (req, res) => {
       Token.countDocuments(tokenQuery),
     ]);
 
-    const tokenIds = issuedTokens.map(token => token.tokenId);
-    const issuedMeterNumbers = issuedTokens.map(t => t.meterNumber);
-    const issuedVendorIds = issuedTokens.map(t => t.vendorId?._id?.toString());
+    // Get txRefs from tokens
+    const txRefs = issuedTokens.map(t => t.txRef).filter(Boolean);
 
-    // Find matching TokenRequests
+    // Fetch TokenRequests matching the txRefs
     const tokenRequests = await TokenRequest.find({
-      $or: [
-        { txRef: { $in: tokenIds } },
-        {
-          meterNumber: { $in: issuedMeterNumbers },
-          vendorId: { $in: issuedVendorIds },
-        },
-      ]
-    }).sort({ createdAt: 1 });
-
-    // Build lookup maps
-    const tokenRequestMap = {};
-    const fallbackRequestMap = {};
-
-    tokenRequests.forEach(request => {
-      if (request.txRef) {
-        tokenRequestMap[request.txRef] = request; // exact txRef match
-      }
-
-      const fallbackKey = `${request.meterNumber}_${request.vendorId.toString()}`;
-      if (!fallbackRequestMap[fallbackKey]) {
-        fallbackRequestMap[fallbackKey] = request; // earliest one
-      }
+      txRef: { $in: txRefs }
     });
 
+    // Map txRef to TokenRequest
+    const tokenRequestMap = {};
+    tokenRequests.forEach(req => {
+      tokenRequestMap[req.txRef] = req;
+    });
+
+    // Build response using matched TokenRequest and Token data
     const formattedTokens = issuedTokens.map(token => {
-      const tokenId = token.tokenId;
-      const meter = token.meterNumber;
-      const vendor = token.vendorId?._id?.toString();
-
-      // Try exact match
-      let tokenRequest = tokenRequestMap[tokenId];
-
-      // Fallback if not found
-      if (!tokenRequest && meter && vendor) {
-        const fallbackKey = `${meter}_${vendor}`;
-        tokenRequest = fallbackRequestMap[fallbackKey];
-      }
+      const matchedRequest = tokenRequestMap[token.txRef];
 
       return {
         _id: token._id,
@@ -345,9 +316,10 @@ const getPaymentTransactionHistory = async (req, res) => {
         disco: token.disco,
         units: token.units,
         amount: token.amount,
-        status: token.status || 'pending',
-        requestDate: tokenRequest?.createdAt || null,
-        issueDate: token.updatedAt,
+        status: token.status || 'issued',
+        requestDate: matchedRequest?.createdAt || null, // when user requested
+        createdAt: token.createdAt,                    // when token was actually issued
+        issueDate: token.createdAt,
         expiryDate: token.expiryDate,
         issuedBy: token.issuedBy,
       };
@@ -369,6 +341,11 @@ const getPaymentTransactionHistory = async (req, res) => {
     });
   }
 };
+
+
+
+
+
 
 // In your backend route (e.g., /tokens/fetchtoken)
 const fetchTokens = async (req, res) => {
@@ -487,7 +464,7 @@ const tokenrequesthistory = async (req, res) => {
 };
 
 
-//Get Issued Token Count 
+//Get Issued Token Count    
 const getIssuedTokenCount = async (req, res) => {
   try {
       const vendorId = req.user._id; // Get vendor ID from authenticated user
