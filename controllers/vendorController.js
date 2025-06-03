@@ -223,7 +223,7 @@ const initiateUpgrade = async (req, res) => {
                         additionalCustomers,
                         amount,
                         reference,
-                        status: 'pending_verification'
+                        status: 'pending' // ✅ important fix
                     }
                 }
             },
@@ -246,6 +246,7 @@ const initiateUpgrade = async (req, res) => {
         return res.status(500).json({ message: 'Failed to initiate upgrade' });
     }
 };
+
   //
   
   
