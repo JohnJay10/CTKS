@@ -1435,24 +1435,53 @@ const CompleteUpgrade = async (req, res) => {
 
 // PATCH /admin/reject/:vendorId/:upgradeId
 const rejectUpgrade = async (req, res) => {
-  const { vendorId, upgradeId } = req.params;
-  try {
-    const vendor = await Vendor.findOneAndUpdate(
-      { _id: vendorId, "pendingUpgrades._id": upgradeId },
-      {
-        $set: { "pendingUpgrades.$.status": "rejected" }
-      },
-      { new: true }
-    );
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-    if (!vendor) {
-      return res.status(404).json({ message: 'Upgrade request not found' });
+  try {
+    const { vendorId, upgradeId } = req.params;
+    const adminId = req.user._id; // optional: in case you want to log who rejected
+
+    if (!mongoose.Types.ObjectId.isValid(upgradeId)) {
+      return res.status(400).json({ message: 'Invalid upgrade ID format' });
     }
 
-    return res.json({ message: 'Upgrade rejected successfully' });
+    const vendor = await Vendor.findById(vendorId).session(session);
+    if (!vendor) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Vendor not found' });
+    }
+
+    const upgrade = vendor.pendingUpgrades.id(upgradeId);
+    if (!upgrade) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Upgrade not found in vendor\'s pending list' });
+    }
+
+    if (upgrade.status !== 'pending') {
+      await session.abortTransaction();
+      return res.status(400).json({ message: `Upgrade is not in pending state (found: ${upgrade.status})` });
+    }
+
+    // Mark it as rejected (or remove from list entirely depending on your logic)
+    upgrade.status = 'rejected';
+    upgrade.rejectedAt = new Date();
+    upgrade.rejectedBy = adminId; // optional for audit
+
+    await vendor.save({ session });
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Upgrade rejected successfully'
+    });
+
   } catch (error) {
-    console.error(error);
+    await session.abortTransaction();
+    console.error('Upgrade rejection error:', error);
     return res.status(500).json({ message: 'Failed to reject upgrade' });
+  } finally {
+    session.endSession();
   }
 };
 
