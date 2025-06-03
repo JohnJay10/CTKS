@@ -232,13 +232,7 @@ const initiateUpgrade = async (req, res) => {
 
         return res.status(200).json({
             message: 'Upgrade request submitted',
-            instructions: {
-                amount,
-                bank: 'Zenith Bank',
-                accountName: 'PowerPay Solutions',
-                accountNumber: '1234567890',
-                reference
-            }
+          
         });
 
     } catch (error) {

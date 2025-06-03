@@ -1311,7 +1311,7 @@ const getSalesReport = async (req, res) => {
 //Get Pending Upgrades 
 const getPendingUpgrades = async (req, res) => {
     try {
-        // 1. Authentication check
+        // 1. Verify authentication
         if (!req.user || !req.user._id) {
             return res.status(401).json({
                 success: false,
@@ -1319,23 +1319,22 @@ const getPendingUpgrades = async (req, res) => {
             });
         }
 
-        // 2. Aggregate pending upgrades
-        const vendorsWithPendingUpgrades = await Vendor.aggregate([
-            { $unwind: "$pendingUpgrades" },
-            { $match: { "pendingUpgrades.status": "pending" } },
-            {
-                $project: {
-                    vendorId: "$_id",
-                    businessName: 1,
-                    email: 1,
-                    upgrade: "$pendingUpgrades",
-                    _id: 0
-                }
-            }
+        // 2. Find all vendors with pending upgrades (admin view)
+        const vendorsWithUpgrades = await Vendor.aggregate([
+            { $match: { 'pendingUpgrades.0': { $exists: true } } }, // Vendors with at least one upgrade
+            { $unwind: '$pendingUpgrades' },
+            { $match: { 'pendingUpgrades.status': 'pending' } },
+            { $project: {
+                vendorId: '$_id',
+                businessName: 1,
+                email: 1,
+                upgrade: '$pendingUpgrades',
+                _id: 0
+            }}
         ]);
 
-        // 3. Map response
-        const pendingUpgrades = vendorsWithPendingUpgrades.map(item => ({
+        // 3. Format the response
+        const pendingUpgrades = vendorsWithUpgrades.map(item => ({
             ...item.upgrade,
             vendorInfo: {
                 id: item.vendorId,
@@ -1351,10 +1350,10 @@ const getPendingUpgrades = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Controller error:", error);
+        console.error('Controller error:', error);
         return res.status(500).json({
             success: false,
-            message: "Internal server error",
+            message: 'Internal server error',
             systemError: process.env.NODE_ENV === 'development' ? {
                 message: error.message,
                 stack: error.stack
@@ -1362,11 +1361,10 @@ const getPendingUpgrades = async (req, res) => {
         });
     }
 };
-
 //Complete Upgrade
 
 const CompleteUpgrade = async (req, res) => {
-    const session = await mongoose.startSession();   
+    const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
