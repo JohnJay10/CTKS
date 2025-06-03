@@ -208,13 +208,23 @@ const initiateUpgrade = async (req, res) => {
         const { additionalCustomers } = req.body;
         const vendorId = req.user._id;
 
-        if (!additionalCustomers || additionalCustomers < 5) {
-            return res.status(400).json({ message: 'Minimum upgrade is 5 additional customers' });
+        // ✅ Validate upgrade input
+        if (
+            !additionalCustomers ||
+            additionalCustomers % 500 !== 0 ||
+            additionalCustomers < 500 ||
+            additionalCustomers > 5000
+        ) {
+            return res.status(400).json({
+                message: 'Upgrade must be in increments of 500 customers (min: 500, max: 5000)'
+            });
         }
 
-        const amount = additionalCustomers * 2000; // ₦2000 per customer
+        // ✅ Correct pricing logic: ₦50,000 per 500 customers
+        const amount = (additionalCustomers / 500) * 50000;
         const reference = `UPG-${Date.now()}-${vendorId.toString().slice(-4)}`;
 
+        // ✅ Push new pending upgrade request
         const vendor = await Vendor.findByIdAndUpdate(
             vendorId,
             {
@@ -223,16 +233,24 @@ const initiateUpgrade = async (req, res) => {
                         additionalCustomers,
                         amount,
                         reference,
-                        status: 'pending' // ✅ important fix
+                        status: 'pending' // Make sure this matches the admin filter
                     }
                 }
             },
             { new: true }
         );
 
+        // ✅ Respond with payment instructions
         return res.status(200).json({
-            message: 'Upgrade request submitted',
-          
+            message: 'Upgrade request submitted successfully',
+            instructions: {
+                amount,
+                bank: 'Zenith Bank',
+                accountName: 'PowerPay Solutions',
+                accountNumber: '1234567890',
+                reference,
+                note: 'Use this reference when making the payment'
+            }
         });
 
     } catch (error) {
@@ -240,6 +258,7 @@ const initiateUpgrade = async (req, res) => {
         return res.status(500).json({ message: 'Failed to initiate upgrade' });
     }
 };
+
 
   //
   

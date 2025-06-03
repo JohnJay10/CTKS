@@ -1311,7 +1311,7 @@ const getSalesReport = async (req, res) => {
 //Get Pending Upgrades 
 const getPendingUpgrades = async (req, res) => {
     try {
-        // 1. Verify authentication
+        // ✅ 1. Authentication check
         if (!req.user || !req.user._id) {
             return res.status(401).json({
                 success: false,
@@ -1319,27 +1319,33 @@ const getPendingUpgrades = async (req, res) => {
             });
         }
 
-        // 2. Find all vendors with pending upgrades (admin view)
-        const vendorsWithUpgrades = await Vendor.aggregate([
-            { $match: { 'pendingUpgrades.0': { $exists: true } } }, // Vendors with at least one upgrade
-            { $unwind: '$pendingUpgrades' },
-            { $match: { 'pendingUpgrades.status': 'pending' } },
-            { $project: {
-                vendorId: '$_id',
-                businessName: 1,
-                email: 1,
-                upgrade: '$pendingUpgrades',
-                _id: 0
-            }}
+        // ✅ 2. Aggregate all pending upgrades
+        const vendorsWithPendingUpgrades = await Vendor.aggregate([
+            { $match: { "pendingUpgrades.0": { $exists: true } } },
+            { $unwind: "$pendingUpgrades" },
+            { $match: { "pendingUpgrades.status": "pending" } },
+            {
+                $project: {
+                    vendorId: "$_id",
+                    businessName: 1,
+                    email: 1,
+                    username: 1,
+                    role: 1,
+                    upgrade: "$pendingUpgrades",
+                    _id: 0
+                }
+            }
         ]);
 
-        // 3. Format the response
-        const pendingUpgrades = vendorsWithUpgrades.map(item => ({
+        // ✅ 3. Format each upgrade with vendor info
+        const pendingUpgrades = vendorsWithPendingUpgrades.map(item => ({
             ...item.upgrade,
             vendorInfo: {
                 id: item.vendorId,
                 businessName: item.businessName,
-                email: item.email
+                email: item.email,
+                username: item.username,
+                role: item.role
             }
         }));
 
@@ -1350,10 +1356,10 @@ const getPendingUpgrades = async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Controller error:', error);
+        console.error("Controller error:", error);
         return res.status(500).json({
             success: false,
-            message: 'Internal server error',
+            message: "Internal server error",
             systemError: process.env.NODE_ENV === 'development' ? {
                 message: error.message,
                 stack: error.stack
@@ -1361,15 +1367,21 @@ const getPendingUpgrades = async (req, res) => {
         });
     }
 };
+
+
 //Complete Upgrade
 
 const CompleteUpgrade = async (req, res) => {
-    const session = await mongoose.startSession();
+    const session = await mongoose.startSession();   
     session.startTransaction();
 
     try {
         const { vendorId, upgradeId } = req.params;
         const adminId = req.user._id;
+
+        if (!mongoose.Types.ObjectId.isValid(upgradeId)) {
+            return res.status(400).json({ message: 'Invalid upgrade ID format' });
+        }
 
         const vendor = await Vendor.findById(vendorId).session(session);
         if (!vendor) {
@@ -1378,9 +1390,14 @@ const CompleteUpgrade = async (req, res) => {
         }
 
         const upgrade = vendor.pendingUpgrades.id(upgradeId);
-        if (!upgrade || upgrade.status !== 'pending_verification') {
+        if (!upgrade) {
             await session.abortTransaction();
-            return res.status(400).json({ message: 'Invalid upgrade request' });
+            return res.status(404).json({ message: 'Upgrade not found in vendor\'s pending list' });
+        }
+
+        if (upgrade.status !== 'pending') {
+            await session.abortTransaction();
+            return res.status(400).json({ message: `Upgrade is not in pending state (found: ${upgrade.status})` });
         }
 
         // Move to completed upgrades
@@ -1411,6 +1428,32 @@ const CompleteUpgrade = async (req, res) => {
     } finally {
         session.endSession();
     }
+};
+
+
+//Reject Upgrade
+
+// PATCH /admin/reject/:vendorId/:upgradeId
+const rejectUpgrade = async (req, res) => {
+  const { vendorId, upgradeId } = req.params;
+  try {
+    const vendor = await Vendor.findOneAndUpdate(
+      { _id: vendorId, "pendingUpgrades._id": upgradeId },
+      {
+        $set: { "pendingUpgrades.$.status": "rejected" }
+      },
+      { new: true }
+    );
+
+    if (!vendor) {
+      return res.status(404).json({ message: 'Upgrade request not found' });
+    }
+
+    return res.json({ message: 'Upgrade rejected successfully' });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Failed to reject upgrade' });
+  }
 };
 
 
