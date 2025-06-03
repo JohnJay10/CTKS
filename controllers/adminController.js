@@ -1491,7 +1491,8 @@ module.exports = {
     getCustomerDistribution,
     getSalesReport,
     getPendingUpgrades,
-    CompleteUpgrade
+    CompleteUpgrade,
+    rejectUpgrade
 
 
      };

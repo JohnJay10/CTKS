@@ -31,7 +31,8 @@ const { registerAdmin,
         getCustomerDistribution,
         getSalesReport,
         getPendingUpgrades,
-        CompleteUpgrade
+        CompleteUpgrade,
+        rejectUpgrade
 } = require('../controllers/adminController');
 
 const auth = require('../middleware/authMiddleware');
@@ -103,7 +104,9 @@ router.get('/sales-report', auth(['admin']), getSalesReport);
 //Get pending upgrades
 router.get('/pending-upgrades', auth(['admin']), getPendingUpgrades);
 
+
 router.patch('/complete/:vendorId/:upgradeId', auth(['admin']), CompleteUpgrade);
+router.patch('/reject/:vendorId/:upgradeId', auth(['admin'], rejectUpgrade))
 
 
 
