@@ -17,6 +17,7 @@ const { registerAdmin,
     deleteVendor,
     deactivateVendor,
     editDiscoPricing,
+    deleteDiscoPricing,
     rejectCustomer,
     logoutAdmin,
     getCustomersCount,
@@ -55,6 +56,7 @@ router.get('/vendors', auth(['admin']), getAllVendors);
 router.post('/disco-pricing', auth(['admin']), discoPricing);
 router.get('/disco-pricing', auth(['admin']), getAllDiscoPricing); 
 router.patch('/disco-pricing/:discoName', auth(['admin']), editDiscoPricing);
+router.delete('/disco-pricing/:discoName', auth(['admin']), deleteDiscoPricing);
 
 
 //Approve Vendor 

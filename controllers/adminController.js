@@ -461,57 +461,195 @@ const deleteCustomer = async (req, res) => {
 //Get Disco   
 
 //Set Disco Pricing
-
 const discoPricing = async (req, res) => {
     const { discoName, pricePerUnit } = req.body;
 
-
-      // Add validation
-      if (!discoName || !pricePerUnit) {
+    // Validate input
+    if (!discoName || !pricePerUnit) {
         return res.status(400).json({ 
+            success: false,
             message: 'Both discoName and pricePerUnit are required' 
         });
     }
 
-
-    try {
-        let pricing = await DiscoPricing.findOne({ discoName });
-        
-        if (pricing) {
-          pricing.pricePerUnit = pricePerUnit;
-        } else {
-          pricing = new DiscoPricing({ discoName, pricePerUnit });
-        }
-    
-        await pricing.save();
-        return res.status(201).json({ message: 'Disco pricing updated successfully' });
-        }
-    catch (error) {
-        return res.status(500).json({ message: error.message });
+    if (isNaN(Number(pricePerUnit))) {  // <-- This line had the syntax error
+        return res.status(400).json({ 
+            success: false,
+            message: 'pricePerUnit must be a valid number' 
+        });
     }
 
-}
-
-//edit Disco Pricing
-const editDiscoPricing = async (req, res) => {
-    const { discoName, pricePerUnit } = req.body;
-    const { discoId } = req.params; // Get from URL parameters
-
     try {
-        const pricing = await DiscoPricing.findById(discoId);
-        if (!pricing) {
-            return res.status(404).json({ message: 'Disco pricing not found' });
+        // Trim and format the discoName
+        const formattedDiscoName = discoName.trim();
+        const numericPrice = Number(pricePerUnit);
+
+        // Check if price is negative
+        if (numericPrice < 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Price cannot be negative'
+            });
         }
 
-        pricing.discoName = discoName || pricing.discoName;
-        pricing.pricePerUnit = pricePerUnit || pricing.pricePerUnit;
-        await pricing.save();
+        // Find existing pricing (case-insensitive)
+        const existingPricing = await DiscoPricing.findOne({ 
+            discoName: { $regex: new RegExp(`^${formattedDiscoName}$`, 'i') }
+        });
 
-        return res.status(200).json({ message: 'Disco pricing updated successfully' });
+        if (existingPricing) {
+            // Update existing record
+            existingPricing.pricePerUnit = numericPrice;
+            existingPricing.updatedAt = Date.now();
+            await existingPricing.save();
+            
+            return res.status(200).json({ 
+                success: true,
+                message: 'Disco pricing updated successfully',
+                data: existingPricing
+            });
+        } else {
+            // Create new record
+            const newPricing = new DiscoPricing({
+                discoName: formattedDiscoName,
+                pricePerUnit: numericPrice
+            });
+            await newPricing.save();
+            
+            return res.status(201).json({ 
+                success: true,
+                message: 'Disco pricing created successfully',
+                data: newPricing
+            });
+        }
     } catch (error) {
-        return res.status(500).json({ message: error.message });
+        console.error('Error in discoPricing:', error);
+        
+        // Handle duplicate key error (case-insensitive)
+        if (error.code === 11000) {
+            return res.status(400).json({
+                success: false,
+                message: 'A DISCO with this name already exists (case-insensitive)'
+            });
+        }
+        
+        return res.status(500).json({ 
+            success: false,
+            message: error.message || 'Internal server error'
+        });
     }
 };
+
+//edit Disco Pricing
+
+const editDiscoPricing = async (req, res) => {
+    const { discoName } = req.params; // Get name from URL params
+    const { pricePerUnit } = req.body; // Only price can be updated
+
+    // Validate inputs
+    if (!discoName || !discoName.trim()) {
+        return res.status(400).json({ 
+            success: false,
+            message: 'DISCO name is required' 
+        });
+    }
+
+    if (!pricePerUnit || isNaN(Number(pricePerUnit))) {
+        return res.status(400).json({ 
+            success: false,
+            message: 'Valid pricePerUnit is required' 
+        });
+    }
+
+    try {
+        // Find by name (case-insensitive exact match)
+        const existingPricing = await DiscoPricing.findOne({
+            discoName: { $regex: new RegExp(`^${discoName.trim()}$`, 'i') }
+        });
+
+        if (!existingPricing) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'DISCO pricing not found' 
+            });
+        }
+
+        const numericPrice = Number(pricePerUnit);
+        if (numericPrice < 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Price cannot be negative'
+            });
+        }
+
+        // Update only the price
+        const updatedPricing = await DiscoPricing.findByIdAndUpdate(
+            existingPricing._id,
+            { 
+                pricePerUnit: numericPrice,
+                updatedAt: new Date() 
+            },
+            { new: true }
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: 'DISCO price updated successfully',
+            data: updatedPricing
+        });
+
+    } catch (error) {
+        console.error('Update error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to update DISCO pricing',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+
+//DELETE ALL 
+
+const deleteDiscoPricing = async (req, res) => {
+    const { discoName } = req.params;
+
+    if (!discoName || !discoName.trim()) {
+        return res.status(400).json({
+            success: false,
+            message: 'DISCO name is required'
+        });
+    }
+
+    try {
+        // Find and delete by name (case-sensitive exact match)
+        const deletedPricing = await DiscoPricing.findOneAndDelete({
+            discoName: discoName.trim()
+        });
+
+        if (!deletedPricing) {
+            return res.status(404).json({
+                success: false,
+                message: 'DISCO pricing not found'
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'DISCO pricing deleted successfully',
+            data: deletedPricing
+        });
+
+    } catch (error) {
+        console.error('Delete error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to delete DISCO pricing',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 
 // Fetch All Disco Price
 
@@ -1485,6 +1623,7 @@ module.exports = {
     deleteVendor,
     deactivateVendor,
     editDiscoPricing,
+    deleteDiscoPricing,
     rejectCustomer,
     logoutAdmin,
     getCustomersCount,
