@@ -9,6 +9,9 @@ const { registerAdmin,
     getPendingVendorCount,
     getPendingCustomerVerificationCount, 
     getAllDiscoPricing, 
+    disableDisco,
+      enableDisco,
+       getActiveDiscos,
     getAllVendors, 
     getAllCustomers,
     updateVerifiedCustomer,
@@ -57,6 +60,23 @@ router.post('/disco-pricing', auth(['admin']), discoPricing);
 router.get('/disco-pricing', auth(['admin']), getAllDiscoPricing); 
 router.patch('/disco-pricing/:discoName', auth(['admin']), editDiscoPricing);
 router.delete('/disco-pricing/:discoName', auth(['admin']), deleteDiscoPricing);
+router.patch(
+  '/disco-pricing/:discoName/disable', 
+  auth(['admin']), 
+  disableDisco
+);
+
+router.patch(
+  '/disco-pricing/:discoName/enable', 
+  auth(['admin']), 
+  enableDisco
+);
+
+// Public route for active DISCOs (used during customer registration)
+router.get('/discos/active', getActiveDiscos);
+
+
+
 
 
 //Approve Vendor 

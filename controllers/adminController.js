@@ -668,27 +668,94 @@ const deleteDiscoPricing = async (req, res) => {
 // Fetch All Disco Price
 
 const getAllDiscoPricing = async (req, res) => {
-    try {
-        const pricing = await DiscoPricing.find();
-        return res.status(200).json({ 
-            success: true,
-            data: pricing.map(item => ({
-                discoName: item.discoName,
-                pricePerUnit: item.pricePerUnit,
-                updatedAt: item.updatedAt
-            })) 
-        });
-    } catch (error) {
-        return res.status(500).json({ 
-            success: false,
-            message: error.message 
-        });
-    }
+  try {
+    const { enabledOnly } = req.query;
+
+    // This line filters in both:
+    // - discos where disabled is false
+    // - and discos where disabled is missing
+    const filter = enabledOnly === 'true'
+      ? { $or: [{ disabled: false }, { disabled: { $exists: false } }] }
+      : {};
+
+    const pricing = await DiscoPricing.find(filter);
+
+    return res.status(200).json({
+      success: true,
+      data: pricing.map(item => ({
+        _id: item._id,
+        discoName: item.discoName,
+        pricePerUnit: item.pricePerUnit,
+        updatedAt: item.updatedAt,
+        disabled: item.disabled ?? false // Treat missing as false
+      }))
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
 };
 
+
+
 //Fetch All Disco
+const disableDisco = async (req, res) => {
+    const { discoName } = req.params;
+    
+    const disco = await DiscoPricing.findOneAndUpdate(
+        { discoName: { $regex: new RegExp(`^${discoName}$`, 'i') } },
+        { disabled: true },
+        { new: true }
+    );
 
+    if (!disco) {
+        return res.status(404).json({ message: 'DISCO not found' });
+    }
 
+    res.json({ 
+        message: `${disco.discoName} disabled`,
+        disabled: true 
+    });
+};
+
+const enableDisco = async (req, res) => {
+    const { discoName } = req.params;
+    
+    const disco = await DiscoPricing.findOneAndUpdate(
+        { discoName: { $regex: new RegExp(`^${discoName}$`, 'i') } },
+        { disabled: false },
+        { new: true }
+    );
+
+    if (!disco) {
+        return res.status(404).json({ message: 'DISCO not found' });
+    }
+
+    res.json({ 
+        message: `${disco.discoName} enabled`,
+        disabled: false 
+    });
+};
+// Get active DISCOs for customer registration
+const getActiveDiscos = async (req, res) => {
+  try {
+    const discos = await DiscoPricing.find({ disabled: false })
+      .select('discoName pricePerUnit')
+      .sort('discoName');
+    
+    res.json({
+      success: true,
+      data: discos
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch DISCOs'
+    });
+  }
+};
 
 const  getPendingVendorCount = async (req, res) => {
     try {
@@ -1628,6 +1695,9 @@ module.exports = {
     getAllVendors,
     getAllCustomers,
     getAllDiscoPricing,
+    disableDisco,
+    enableDisco,
+    getActiveDiscos,
     getTokenRequestCount,
     getPendingVendorCount,
     getPendingCustomerVerificationCount,

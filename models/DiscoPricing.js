@@ -14,6 +14,10 @@ const DiscoPricingSchema = new mongoose.Schema({
     required: true,
     min: 0
   },
+   disabled: {  // 👈 New field
+    type: Boolean,
+    default: false 
+  },
   updatedAt: { 
     type: Date, 
     default: Date.now 
