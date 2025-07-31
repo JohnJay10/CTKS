@@ -7,7 +7,7 @@ const DiscoPricingSchema = new mongoose.Schema({
     trim: true,
     minlength: 2,
     maxlength: 50,
-    index: true  // Remove this line if you're using schema.index() below
+ 
   },
   pricePerUnit: { 
     type: Number, 

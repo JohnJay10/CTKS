@@ -286,17 +286,31 @@ const getCustomersCount = async (req, res) => {
 };
 
 const verifyCustomer = async (req, res) => {
-    const { customerId } = req.params; // Get from URL parameters
+    const { customerId } = req.params;
     const { KRN, SGC, TI, MSN, MTK1, MTK2, RTK1, RTK2 } = req.body;
 
     try {
-        // 1. Find the customer first
+        // 1. Find the customer and validate existence
         const customer = await Customer.findById(customerId);
         if (!customer) {
             return res.status(404).json({ message: 'Customer not found' });
         }
 
-        // 2. Check if already verified
+        // 2. Validate DISCO exists in DiscoPricing
+        const DiscoPricing = mongoose.model('DiscoPricing');
+        const validDisco = await DiscoPricing.exists({ 
+            discoName: customer.disco.toUpperCase() // Case-insensitive check
+        });
+
+        if (!validDisco) {
+            return res.status(400).json({
+                message: 'Invalid DISCO - not found in system records',
+                providedDisco: customer.disco,
+                validDiscos: await DiscoPricing.distinct('discoName')
+            });
+        }
+
+        // 3. Check if already verified
         if (customer.verification.isVerified) {
             return res.status(400).json({ 
                 message: 'Customer already verified',
@@ -304,7 +318,7 @@ const verifyCustomer = async (req, res) => {
             });
         }
 
-        // 3. Validate required fields
+        // 4. Validate required fields (unchanged)
         const requiredFields = { KRN, SGC, TI, MSN, MTK1, MTK2, RTK1, RTK2 };
         const missingFields = Object.entries(requiredFields)
             .filter(([_, value]) => !value)
@@ -318,9 +332,9 @@ const verifyCustomer = async (req, res) => {
             });
         }
 
-        // 4. Update verification
+        // 5. Update verification (unchanged)
         customer.verification = {
-            ...customer.verification, // Preserve existing data
+            ...customer.verification,
             KRN,
             SGC,
             TI,
@@ -331,12 +345,12 @@ const verifyCustomer = async (req, res) => {
             RTK2,
             isVerified: true,  
             verifiedAt: new Date(),
-            verifiedBy: req.user._id // Admin who verified
+            verifiedBy: req.user._id
         };
 
         await customer.save();
 
-        // 5. Return success
+        // 6. Return success
         return res.status(200).json({
             message: 'Customer verified successfully',
             customerId: customer._id,

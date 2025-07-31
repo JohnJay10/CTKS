@@ -2,11 +2,12 @@ const mongoose = require('mongoose');
 
 const CustomerSchema = new mongoose.Schema({
   meterNumber: { type: String, required: true, unique: true },
-  disco: { 
+ disco: { 
     type: String, 
     required: true, 
-    enum: ["ABA", "IKEDC", "IBEDC", "AEDC", "BEDC", "EEDC"] 
-  },    
+    trim: true, // Ensure no extra whitespace
+    uppercase: true, // Store in consistent format (e.g., "EKEDC")
+  },   
   lastToken: { type: String },
   verification: {
     KRN: { type: String },
