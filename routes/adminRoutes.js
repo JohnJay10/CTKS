@@ -111,7 +111,7 @@ router.get('/profile', getAdminProfile);
 router.get('/admins', superAdminOnly, getAdmins);
 router.post('/admins/register', superAdminOnly, registerAdminWithPermissions);
 router.get('/admins/:id', superAdminOnly, getAdminById);
-router.patch('/admins/:id/edit', superAdminOnly, updateAdmin);
+router.patch('/admins/:id', superAdminOnly, updateAdmin);
 router.patch('/admins/:id/toggle-status', superAdminOnly, toggleAdminStatus);
 router.delete('/admins/:id/delete', superAdminOnly, deleteAdmin);
 router.patch('/admins/:id/permissions', superAdminOnly, updateAdminPermissions);
