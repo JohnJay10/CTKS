@@ -109,7 +109,7 @@ router.get('/profile', getAdminProfile);
 
 // Admin Management Routes (Super Admin Only)
 router.get('/admins', superAdminOnly, getAdmins);
-router.post('/register', superAdminOnly, registerAdminWithPermissions);
+router.post('/admins/register', superAdminOnly, registerAdminWithPermissions);
 router.get('/admins/:id', superAdminOnly, getAdminById);
 router.patch('/admins/:id/edit', superAdminOnly, updateAdmin);
 router.patch('/admins/:id/toggle-status', superAdminOnly, toggleAdminStatus);
