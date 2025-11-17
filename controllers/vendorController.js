@@ -82,8 +82,23 @@ const addCustomer = async (req, res) => {
         if (!vendor) {
             return res.status(404).json({ message: 'Vendor account not found' });
         }
+
+        // Check if vendor is approved
         if (!vendor.approved) {
             return res.status(403).json({ message: 'Vendor account not approved' });
+        }
+
+        // Check if vendor is allowed to add customers
+        if (vendor.canAddCustomers === false) {
+            return res.status(403).json({
+                message: 'Account Restricted',
+                code: 'CUSTOMER_ADDITION_RESTRICTED',
+                restriction: {
+                    active: true,
+                    since: vendor.lastUpdatedBy?.at,
+                    reason: vendor.lastUpdatedBy?.reason || 'Administrative restriction'
+                }
+            });
         }
 
         // Check customer limit (automatically applies any pending upgrades)

@@ -10,6 +10,10 @@ const VendorSchema = new mongoose.Schema({
     tokenAvailable: { type: Boolean, default: false },
     businessName: { type: String },
     customerLimit: { type: Number, default: 1000 },
+      canAddCustomers: { 
+        type: Boolean, 
+        default: true 
+    },
     
     // Upgrade tracking
     pendingUpgrades: [{
@@ -57,11 +61,16 @@ VendorSchema.methods.comparePassword = async function(password) {
 
 // Method to check if vendor can add more customers
 VendorSchema.methods.canAddCustomer = async function() {
+    // First check if vendor is allowed to add customers at all
+    if (!this.canAddCustomers) {
+        return false;
+    }
+    
+    // Then check customer limit
     const customerCount = await mongoose.model('Customer').countDocuments({ vendorId: this._id });
     const effectiveLimit = this.getEffectiveCustomerLimit();
     return customerCount < effectiveLimit;
 };
-
 // Method to get effective customer limit (including approved upgrades)
 VendorSchema.methods.getEffectiveCustomerLimit = function() {
     // Base limit is now 1000

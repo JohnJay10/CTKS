@@ -6,43 +6,45 @@ const auth = (roles = []) => {
     return async (req, res, next) => {
         const token = req.header('Authorization')?.replace('Bearer ', '');
 
+        console.log('🔐 BACKEND AUTH MIDDLEWARE ======================');
+        console.log('  - Path:', req.path);
+        console.log('  - Required roles:', roles);
+        console.log('  - Token provided:', !!token);
+
         if (!token) {
+            console.log('❌ No token provided');
             return res.status(401).json({ message: 'No token provided' });
         }
 
         try {
-            // 1. Verify JWT
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            console.log('  - Decoded token role:', decoded.role);
 
-            // 2. Check role permissions
+            // Check role permissions
             if (roles.length && !roles.includes(decoded.role)) {
+                console.log(`❌ Role ${decoded.role} not in required roles: ${roles}`);
                 return res.status(403).json({ message: 'Unauthorized for this action' });
             }
 
-            // 3. Fetch full user document based on role
-            let user;
-            if (decoded.role === 'admin') {
-                user = await Admin.findById(decoded.id).select('-password');
-            } else if (decoded.role === 'vendor') {
-                user = await Vendor.findById(decoded.id).select('-password');
-            }
+            // Fetch user
+            const user = await Admin.findById(decoded.id).select('-password');
+            console.log('  - User found:', user?.username);
+            console.log('  - User role:', user?.role);
+            console.log('  - User permissions:', user?.permissions);
 
             if (!user) {
+                console.log('❌ User not found');
                 return res.status(401).json({ message: 'User not found' });
             }
 
-            // 4. Attach full user object to request
+            console.log('✅ Auth successful');
             req.user = user;
+            req.admin = user;
             next();
 
         } catch (error) {
-            if (error.name === 'TokenExpiredError') {
-                return res.status(401).json({ message: 'Token expired' });
-            } else if (error.name === 'JsonWebTokenError') {
-                return res.status(401).json({ message: 'Invalid token' });
-            }
-            console.error('Authentication error:', error);
-            return res.status(500).json({ message: 'Authentication failed' });
+            console.error('💥 Auth error:', error.message);
+            return res.status(401).json({ message: 'Token invalid' });
         }
     };
 };

@@ -12,61 +12,142 @@ const mongoose = require('mongoose');
 
 //Register an Admin
 
+// @desc    Register a new admin (Super Admin only) - UPDATED VERSION
 const registerAdmin = async (req, res) => {
-    const { username, password, role } = req.body;
+    const { username, password, role, permissions } = req.body;
+    
     try {
-        //check if admin already exists
+        // Check if admin already exists
         const adminExists = await Admin.findOne({ username });
         if (adminExists) {
             return res.status(400).json({ message: 'Admin already exists' });
         }
 
-        //create a new admin
-        const admin = await Admin.create({ username, password, role });
+        // Only super admin can create other admins
+        if (req.admin && req.admin.role !== 'super_admin') {
+            return res.status(403).json({ 
+                message: 'Access denied. Only super admin can create admins.' 
+            });
+        }
+
+        // Create a new admin with permissions
+        const admin = await Admin.create({
+            username, 
+            password, 
+            role: role || 'admin',
+            permissions: permissions || {
+                createVendors: false,
+                verifyCustomers: false,
+                discoPricing: false,
+                tokenManagement: false
+            },
+            createdBy: req.admin ? req.admin._id : null // Set to null if created during setup
+        });
 
         if (admin) {
             return res.status(201).json({
                 _id: admin._id,
                 username: admin.username,
                 role: admin.role,
+                permissions: admin.permissions,
+                active: admin.active,
+                createdAt: admin.createdAt,
                 token: generateToken(admin._id)
             });
         } else {
             return res.status(400).json({ message: 'Invalid admin data' });
         }
-        } catch (error) {
-            return res.status(500).json({ message: error.message });
-        }
+    } catch (error) {
+        return res.status(500).json({ message: error.message });
     }
-
+}
 
     //Login an Admin
-    const loginAdmin = async (req, res) => {
-        const { username, password } = req.body;
-        try {
-            const admin = await Admin.findOne({username});
-            if (!admin) {
-                return res.status(401).json({ message: 'Invalid username or password' });
-            }
-    
-            // Check if password is correct
-            const isPasswordCorrect = await admin.comparePassword(password);
-            if (!isPasswordCorrect) {
-                return res.status(401).json({ message: 'Invalid username or password' });
-            }
-    
-            // Return the admin data with token 
-            return res.status(200).json({
-                _id: admin._id,
-                username: admin.username,
-                role: admin.role,
-                token: generateToken(admin._id, admin.role)  // Pass the role here
-            });
-        } catch (error) {
-            return res.status(500).json({ message: error.message });
-        }
-    }
 
+   const loginAdmin = async (req, res) => {
+    const { username, password } = req.body;
+    
+    console.log('🔐 LOGIN ATTEMPT =================================');
+    console.log('Username provided:', username);
+    console.log('Password length:', password ? password.length : 'undefined');
+    
+    try {
+        // Try multiple search methods
+        let admin;
+        
+        // Method 1: Exact match (original behavior)
+        admin = await Admin.findOne({ username });
+        console.log('1. Exact match search:', admin ? 'FOUND' : 'NOT FOUND');
+        
+        // Method 2: Case insensitive search
+        if (!admin) {
+            admin = await Admin.findOne({ 
+                username: { $regex: new RegExp(`^${username}$`, 'i') } 
+            });
+            console.log('2. Case insensitive search:', admin ? 'FOUND' : 'NOT FOUND');
+        }
+        
+        // Method 3: Direct database query as fallback
+        if (!admin) {
+            const db = mongoose.connection.db;
+            const rawAdmin = await db.collection('admins').findOne({ 
+                username: { $regex: new RegExp(`^${username}$`, 'i') } 
+            });
+            if (rawAdmin) {
+                console.log('3. Raw database query: FOUND');
+                // Convert to Mongoose document
+                admin = new Admin(rawAdmin);
+            } else {
+                console.log('3. Raw database query: NOT FOUND');
+            }
+        }
+        
+        if (!admin) {
+            console.log('❌ ADMIN NOT FOUND WITH ANY SEARCH METHOD');
+            return res.status(401).json({ message: 'Invalid username or password' });
+        }
+
+        console.log('✅ ADMIN FOUND:');
+        console.log('  - ID:', admin._id);
+        console.log('  - Username:', admin.username);
+        console.log('  - Role:', admin.role);
+        console.log('  - Active:', admin.active);
+
+        // Check if admin is active
+        if (admin.active === false) {
+            console.log('❌ ACCOUNT DEACTIVATED');
+            return res.status(401).json({ message: 'Account is deactivated' });
+        }
+
+        // Test password comparison
+        console.log('🔄 TESTING PASSWORD...');
+        const isPasswordCorrect = await admin.comparePassword(password);
+        console.log('  Password match:', isPasswordCorrect);
+
+        if (!isPasswordCorrect) {
+            console.log('❌ PASSWORD MISMATCH');
+            return res.status(401).json({ message: 'Invalid username or password' });
+        }
+
+        console.log('✅ LOGIN SUCCESSFUL');
+        
+        // Generate token
+        const token = generateToken(admin._id, admin.role);
+        
+        return res.status(200).json({
+            _id: admin._id,
+            username: admin.username,
+            role: admin.role,
+            permissions: admin.permissions || {},
+            active: admin.active,
+            token: token
+        });
+        
+    } catch (error) {
+        console.error('💥 LOGIN ERROR:', error);
+        return res.status(500).json({ message: 'Login failed' });
+    }
+}
 
     //Logout Admin
   const logoutAdmin = async (req, res) => {
@@ -84,6 +165,302 @@ const registerAdmin = async (req, res) => {
     }
 }
 
+
+// Add these new functions to your existing adminController
+
+// @desc    Get all admins (Super Admin only)
+const getAdmins = async (req, res) => {
+  try {
+    const admins = await Admin.find()
+      .select('-password')
+      .populate('createdBy', 'username')
+      .sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      data: admins,
+      count: admins.length
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Get admin by ID (Super Admin only)
+const getAdminById = async (req, res) => {
+  try {
+    const admin = await Admin.findById(req.params.id)
+      .select('-password')
+      .populate('createdBy', 'username');
+
+    if (admin) {
+      res.json({
+        success: true,
+        data: admin
+      });
+    } else {
+      res.status(404).json({ message: 'Admin not found' });
+    }
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Update admin (Super Admin only)
+const updateAdmin = async (req, res) => {
+  try {
+    const admin = await Admin.findById(req.params.id);
+
+    if (!admin) {
+      return res.status(404).json({ message: 'Admin not found' });
+    }
+
+    // Prevent super admin from being demoted
+    if (admin.role === 'super_admin' && req.body.role === 'admin') {
+      return res.status(400).json({ message: 'Cannot demote super admin' });
+    }
+
+    const { username, role, permissions, password } = req.body;
+
+    admin.username = username || admin.username;
+    admin.role = role || admin.role;
+    
+    if (permissions) {
+      admin.permissions = { ...admin.permissions, ...permissions };
+    }
+
+    if (password && password.trim() !== '') {
+      admin.password = password;
+    }
+
+    const updatedAdmin = await admin.save();
+
+    res.json({
+      success: true,
+      data: {
+        _id: updatedAdmin._id,
+        username: updatedAdmin.username,
+        role: updatedAdmin.role,
+        permissions: updatedAdmin.permissions,
+        active: updatedAdmin.active,
+        updatedAt: updatedAdmin.updatedAt
+      },
+      message: 'Admin updated successfully'
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      res.status(400).json({ message: 'Username already exists' });
+    } else {
+      res.status(500).json({ message: error.message });
+    }
+  }
+};
+
+// @desc    Toggle admin status (Super Admin only)
+const toggleAdminStatus = async (req, res) => {
+  try {
+    const admin = await Admin.findById(req.params.id);
+
+    if (!admin) {
+      return res.status(404).json({ message: 'Admin not found' });
+    }
+
+    // Prevent deactivating super admin
+    if (admin.role === 'super_admin' && !req.body.active) {
+      return res.status(400).json({ message: 'Cannot deactivate super admin' });
+    }
+
+    admin.active = req.body.active;
+    const updatedAdmin = await admin.save();
+
+    res.json({
+      success: true,
+      data: {
+        _id: updatedAdmin._id,
+        username: updatedAdmin.username,
+        active: updatedAdmin.active
+      },
+      message: `Admin ${updatedAdmin.active ? 'activated' : 'deactivated'} successfully`
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Delete admin (Super Admin only)
+const deleteAdmin = async (req, res) => {
+  try {
+    const admin = await Admin.findById(req.params.id);
+
+    if (!admin) {
+      return res.status(404).json({ message: 'Admin not found' });
+    }
+
+    // Prevent deleting super admin
+    if (admin.role === 'super_admin') {
+      return res.status(400).json({ message: 'Cannot delete super admin' });
+    }
+
+    // Prevent deleting yourself
+    if (admin._id.toString() === req.admin._id.toString()) {
+      return res.status(400).json({ message: 'Cannot delete your own account' });
+    }
+
+    await Admin.findByIdAndDelete(req.params.id);
+
+    res.json({
+      success: true,
+      message: 'Admin deleted successfully'
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Get current admin profile
+const getAdminProfile = async (req, res) => {
+  try {
+    const admin = await Admin.findById(req.admin._id).select('-password');
+    
+    res.json({
+      success: true,
+      data: admin
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Update admin permissions (Super Admin only)
+// @desc    Update admin permissions (Super Admin only)
+const updateAdminPermissions = async (req, res) => {
+  try {
+    const admin = await Admin.findById(req.params.id);
+
+    if (!admin) {
+      return res.status(404).json({ message: 'Admin not found' });
+    }
+
+    // Cannot update super admin permissions
+    if (admin.role === 'super_admin') {
+      return res.status(400).json({ message: 'Cannot update super admin permissions' });
+    }
+
+    const { 
+      createVendors, 
+      verifyCustomers, 
+      discoPricing, 
+      tokenManagement,
+      accountManagement,
+      vendorSpace,
+      vendorCustomer,
+      viewAnalytics,
+      systemSettings
+    } = req.body;
+
+    admin.permissions = {
+      createVendors: createVendors || false,
+      verifyCustomers: verifyCustomers || false,
+      discoPricing: discoPricing || false,
+      tokenManagement: tokenManagement || false,
+      accountManagement: accountManagement || false,
+      vendorSpace: vendorSpace || false,
+      vendorCustomer: vendorCustomer || false,
+      viewAnalytics: viewAnalytics || false,
+      systemSettings: systemSettings || false
+    };
+
+    const updatedAdmin = await admin.save();
+
+    res.json({
+      success: true,
+      data: {
+        _id: updatedAdmin._id,
+        username: updatedAdmin.username,
+        permissions: updatedAdmin.permissions
+      },
+      message: 'Admin permissions updated successfully'
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Create admin with permissions (Super Admin only)
+// In your adminController.js - update registerAdminWithPermissions
+const registerAdminWithPermissions = async (req, res) => {
+  const { username, password, role, permissions } = req.body;
+  
+  console.log('👨‍💼 Creating new admin:', { username, role, permissions });
+  
+  try {
+    // Check if admin already exists
+    const adminExists = await Admin.findOne({ username });
+    if (adminExists) {
+      return res.status(400).json({ message: 'Admin already exists' });
+    }
+
+    // Create a new admin with all permissions
+    const admin = await Admin.create({
+      username,
+      password,
+      role: role || 'admin',
+      permissions: permissions || {
+        // Existing permissions
+        createVendors: false,
+        verifyCustomers: false,
+        discoPricing: false,
+        tokenManagement: false,
+        // New permissions
+        accountManagement: false,
+        vendorSpace: false,
+        vendorCustomer: false,
+        viewAnalytics: false,
+        systemSettings: false
+      },
+      createdBy: req.admin._id
+    });
+
+    if (admin) {
+      console.log('✅ Admin created successfully:', admin.username);
+      
+      // Generate token with proper error handling
+      let token;
+      try {
+        token = generateToken(admin._id, admin.role);
+        console.log('✅ Token generated for new admin');
+      } catch (tokenError) {
+        console.error('❌ Token generation failed:', tokenError.message);
+        // Still return success but without token
+        return res.status(201).json({
+          _id: admin._id,
+          username: admin.username,
+          role: admin.role,
+          permissions: admin.permissions,
+          active: admin.active,
+          createdAt: admin.createdAt,
+          message: 'Admin created successfully but token generation failed'
+        });
+      }
+
+      // Return success with token
+      res.status(201).json({
+        _id: admin._id,
+        username: admin.username,
+        role: admin.role,
+        permissions: admin.permissions,
+        active: admin.active,
+        createdAt: admin.createdAt,
+        token: token
+      });
+    } else {
+      res.status(400).json({ message: 'Invalid admin data' });
+    }
+  } catch (error) {
+    console.error('❌ Admin creation error:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
 
 //create Vendor 
 
@@ -273,6 +650,70 @@ const getAllCustomers = async (req, res) => {
     }
 };
 
+
+// Toggle vendor's ability to add customers
+const toggleVendorCustomerAddition = async (req, res) => {
+    const { vendorId } = req.params;
+    const { canAddCustomers, reason } = req.body; // reason is optional
+    
+    try {
+        const vendor = await Vendor.findById(vendorId);
+        if (!vendor) {
+            return res.status(404).json({ message: 'Vendor not found' });
+        }
+
+        // Update the flag
+        vendor.canAddCustomers = canAddCustomers;
+        
+        // Optional: Track who made the change and why
+        vendor.lastUpdatedBy = {
+            user: req.user._id,
+            at: new Date(),
+            reason: reason || (canAddCustomers ? 'Restriction lifted' : 'Restriction applied')
+        };
+
+        await vendor.save();
+
+        return res.status(200).json({
+            message: `Vendor ${vendor.username} can ${vendor.canAddCustomers ? 'now' : 'no longer'} add customers`,
+            canAddCustomers: vendor.canAddCustomers,
+            updatedAt: vendor.updatedAt
+        });
+    } catch (error) {
+        return res.status(500).json({ message: error.message });
+    }
+};
+
+// Get vendor's customer addition status
+const getVendorAdditionStatus = async (req, res) => {
+    const { vendorId } = req.params;
+    
+    try {
+        const vendor = await Vendor.findById(vendorId)
+            .select('username email canAddCustomers customerLimit lastUpdatedBy');
+            
+        if (!vendor) {
+            return res.status(404).json({ message: 'Vendor not found' });
+        }
+
+        // Get current customer count
+        const customerCount = await mongoose.model('Customer').countDocuments({ vendorId });
+        const effectiveLimit = vendor.getEffectiveCustomerLimit();
+
+        return res.status(200).json({
+            vendorId: vendor._id,
+            username: vendor.username,
+            email: vendor.email,
+            canAddCustomers: vendor.canAddCustomers,
+            customerCount,
+            customerLimit: effectiveLimit,
+            canAddMore: customerCount < effectiveLimit,
+            lastUpdated: vendor.lastUpdatedBy
+        });
+    } catch (error) {
+        return res.status(500).json({ message: error.message });
+    }
+};
 
 //Get All Customers Count
 
@@ -1682,6 +2123,255 @@ const rejectUpgrade = async (req, res) => {
 };
 
 
+// Add customer space to vendor directly (Admin function)
+const addCustomerSpaceToVendor = async (req, res) => {
+    const { vendorId } = req.params;
+    const { additionalCustomers, reason } = req.body;
+    
+    try {
+        // Validate input
+        if (!additionalCustomers || additionalCustomers <= 0) {
+            return res.status(400).json({ 
+                success: false,
+                message: 'Additional customers must be a positive number' 
+            });
+        }
+
+        const vendor = await Vendor.findById(vendorId);
+        if (!vendor) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'Vendor not found' 
+            });
+        }
+
+        // Calculate new customer limit
+        const newCustomerLimit = vendor.customerLimit + parseInt(additionalCustomers);
+        
+        // Update vendor's customer limit
+        vendor.customerLimit = newCustomerLimit;
+        
+        // Record the upgrade in completed upgrades
+        vendor.completedUpgrades.push({
+            additionalCustomers: parseInt(additionalCustomers),
+            amount: 0, // Free upgrade by admin
+            approvedAt: new Date(),
+            approvedBy: req.user._id,
+            status: 'completed',
+            reason: reason || 'Admin granted additional customer space',
+            type: 'admin_granted' // Distinguish from paid upgrades
+        });
+
+        // Update last modified info
+        vendor.lastUpdatedBy = {
+            user: req.user._id,
+            at: new Date(),
+            reason: reason || `Admin granted ${additionalCustomers} additional customer slots`
+        };
+
+        await vendor.save();
+
+        return res.status(200).json({
+            success: true,
+            message: `Successfully added ${additionalCustomers} customer slots to ${vendor.username}`,
+            data: {
+                vendorId: vendor._id,
+                vendorName: vendor.username,
+                previousCustomerLimit: vendor.customerLimit - additionalCustomers,
+                newCustomerLimit: vendor.customerLimit,
+                totalAdded: parseInt(additionalCustomers),
+                grantedAt: new Date()
+            }
+        });
+
+    } catch (error) {
+        console.error('Add customer space error:', error);
+        return res.status(500).json({ 
+            success: false,
+            message: 'Failed to add customer space to vendor',
+            error: error.message 
+        });
+    }
+};
+
+// Reduce customer space from vendor (Admin function)
+const reduceCustomerSpaceFromVendor = async (req, res) => {
+    const { vendorId } = req.params;
+    const { reduceCustomers, reason } = req.body;
+    
+    try {
+        // Validate input
+        if (!reduceCustomers || reduceCustomers <= 0) {
+            return res.status(400).json({ 
+                success: false,
+                message: 'Reduce customers must be a positive number' 
+            });
+        }
+
+        const vendor = await Vendor.findById(vendorId);
+        if (!vendor) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'Vendor not found' 
+            });
+        }
+
+        // Check if reduction is possible
+        const currentCustomerCount = await mongoose.model('Customer').countDocuments({ vendorId });
+        const proposedNewLimit = vendor.customerLimit - parseInt(reduceCustomers);
+        
+        if (proposedNewLimit < currentCustomerCount) {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot reduce customer limit to ${proposedNewLimit}. Vendor currently has ${currentCustomerCount} customers.`,
+                currentCustomerCount,
+                proposedNewLimit,
+                minimumAllowed: currentCustomerCount
+            });
+        }
+
+        if (proposedNewLimit < 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Customer limit cannot be negative'
+            });
+        }
+
+        // Update vendor's customer limit
+        const previousLimit = vendor.customerLimit;
+        vendor.customerLimit = proposedNewLimit;
+        
+        // Record the reduction
+        vendor.completedUpgrades.push({
+            additionalCustomers: -parseInt(reduceCustomers), // Negative to indicate reduction
+            amount: 0,
+            approvedAt: new Date(),
+            approvedBy: req.user._id,
+            status: 'completed',
+            reason: reason || 'Admin reduced customer space',
+            type: 'admin_reduced'
+        });
+
+        // Update last modified info
+        vendor.lastUpdatedBy = {
+            user: req.user._id,
+            at: new Date(),
+            reason: reason || `Admin reduced customer limit by ${reduceCustomers} slots`
+        };
+
+        await vendor.save();
+
+        return res.status(200).json({
+            success: true,
+            message: `Successfully reduced ${reduceCustomers} customer slots from ${vendor.username}`,
+            data: {
+                vendorId: vendor._id,
+                vendorName: vendor.username,
+                previousCustomerLimit: previousLimit,
+                newCustomerLimit: vendor.customerLimit,
+                totalReduced: parseInt(reduceCustomers),
+                currentCustomerCount,
+                reducedAt: new Date()
+            }
+        });
+
+    } catch (error) {
+        console.error('Reduce customer space error:', error);
+        return res.status(500).json({ 
+            success: false,
+            message: 'Failed to reduce customer space from vendor',
+            error: error.message 
+        });
+    }
+};
+
+// Set specific customer limit for vendor (Admin function)
+const setCustomerLimitForVendor = async (req, res) => {
+    const { vendorId } = req.params;
+    const { newCustomerLimit, reason } = req.body;
+    
+    try {
+        // Validate input
+        if (!newCustomerLimit || newCustomerLimit < 0) {
+            return res.status(400).json({ 
+                success: false,
+                message: 'Customer limit must be a non-negative number' 
+            });
+        }
+
+        const vendor = await Vendor.findById(vendorId);
+        if (!vendor) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'Vendor not found' 
+            });
+        }
+
+        // Check if new limit is acceptable
+        const currentCustomerCount = await mongoose.model('Customer').countDocuments({ vendorId });
+        
+        if (newCustomerLimit < currentCustomerCount) {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot set customer limit to ${newCustomerLimit}. Vendor currently has ${currentCustomerCount} customers.`,
+                currentCustomerCount,
+                proposedNewLimit: newCustomerLimit,
+                minimumAllowed: currentCustomerCount
+            });
+        }
+
+        // Calculate the difference
+        const difference = newCustomerLimit - vendor.customerLimit;
+        const previousLimit = vendor.customerLimit;
+        
+        // Update vendor's customer limit
+        vendor.customerLimit = newCustomerLimit;
+        
+        // Record the change
+        vendor.completedUpgrades.push({
+            additionalCustomers: difference,
+            amount: 0,
+            approvedAt: new Date(),
+            approvedBy: req.user._id,
+            status: 'completed',
+            reason: reason || `Admin set customer limit to ${newCustomerLimit}`,
+            type: difference >= 0 ? 'admin_set_increase' : 'admin_set_decrease'
+        });
+
+        // Update last modified info
+        vendor.lastUpdatedBy = {
+            user: req.user._id,
+            at: new Date(),
+            reason: reason || `Admin set customer limit from ${previousLimit} to ${newCustomerLimit}`
+        };
+
+        await vendor.save();
+
+        return res.status(200).json({
+            success: true,
+            message: `Successfully set customer limit for ${vendor.username} to ${newCustomerLimit}`,
+            data: {
+                vendorId: vendor._id,
+                vendorName: vendor.username,
+                previousCustomerLimit: previousLimit,
+                newCustomerLimit: vendor.customerLimit,
+                difference: difference,
+                currentCustomerCount,
+                action: difference >= 0 ? 'increased' : 'decreased',
+                setAt: new Date()
+            }
+        });
+
+    } catch (error) {
+        console.error('Set customer limit error:', error);
+        return res.status(500).json({ 
+            success: false,
+            message: 'Failed to set customer limit for vendor',
+            error: error.message 
+        });
+    }
+};
+
 
 
 
@@ -1723,7 +2413,21 @@ module.exports = {
     getSalesReport,
     getPendingUpgrades,
     CompleteUpgrade,
-    rejectUpgrade
+    rejectUpgrade,
+    toggleVendorCustomerAddition,
+    getVendorAdditionStatus,
+    // NEW ADMIN MANAGEMENT FUNCTIONS
+    getAdmins,
+    getAdminById,
+    updateAdmin,
+    toggleAdminStatus,
+    deleteAdmin,
+    getAdminProfile,
+    updateAdminPermissions,
+    registerAdminWithPermissions,
+    addCustomerSpaceToVendor,
+    reduceCustomerSpaceFromVendor,
+    setCustomerLimitForVendor
 
 
      };
