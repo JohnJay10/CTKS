@@ -64,7 +64,7 @@ const registerAdmin = async (req, res) => {
 
     //Login an Admin
 
-   const loginAdmin = async (req, res) => {
+  const loginAdmin = async (req, res) => {
     const { username, password } = req.body;
     
     console.log('🔐 LOGIN ATTEMPT =================================');
@@ -72,14 +72,13 @@ const registerAdmin = async (req, res) => {
     console.log('Password length:', password ? password.length : 'undefined');
     
     try {
-        // Try multiple search methods
         let admin;
         
-        // Method 1: Exact match (original behavior)
+        // Method 1: Exact match with Mongoose (preferred)
         admin = await Admin.findOne({ username });
         console.log('1. Exact match search:', admin ? 'FOUND' : 'NOT FOUND');
         
-        // Method 2: Case insensitive search
+        // Method 2: Case insensitive search with Mongoose
         if (!admin) {
             admin = await Admin.findOne({ 
                 username: { $regex: new RegExp(`^${username}$`, 'i') } 
@@ -87,19 +86,12 @@ const registerAdmin = async (req, res) => {
             console.log('2. Case insensitive search:', admin ? 'FOUND' : 'NOT FOUND');
         }
         
-        // Method 3: Direct database query as fallback
+        // Method 3: If still not found, try case-insensitive with Mongoose only
         if (!admin) {
-            const db = mongoose.connection.db;
-            const rawAdmin = await db.collection('admins').findOne({ 
-                username: { $regex: new RegExp(`^${username}$`, 'i') } 
+            admin = await Admin.findOne({ 
+                username: { $regex: new RegExp(username, 'i') } 
             });
-            if (rawAdmin) {
-                console.log('3. Raw database query: FOUND');
-                // Convert to Mongoose document
-                admin = new Admin(rawAdmin);
-            } else {
-                console.log('3. Raw database query: NOT FOUND');
-            }
+            console.log('3. Loose case insensitive search:', admin ? 'FOUND' : 'NOT FOUND');
         }
         
         if (!admin) {
@@ -119,9 +111,9 @@ const registerAdmin = async (req, res) => {
             return res.status(401).json({ message: 'Account is deactivated' });
         }
 
-        // Test password comparison
+        // Use matchPassword instead of comparePassword (based on your schema)
         console.log('🔄 TESTING PASSWORD...');
-        const isPasswordCorrect = await admin.comparePassword(password);
+        const isPasswordCorrect = await admin.matchPassword(password);
         console.log('  Password match:', isPasswordCorrect);
 
         if (!isPasswordCorrect) {
