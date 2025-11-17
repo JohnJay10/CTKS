@@ -6,59 +6,89 @@ const generateToken = require('../utils/generateToken');
 const ActivityLog = require('../models/ActivityLog');
 const BankAccount = require('../models/BankAccount');
 
+// controllers/vendorController.js - loginVendor function
 const loginVendor = async (req, res) => {
     const { email, password } = req.body;
 
     try {
         // Input validation
         if (!email || !password) {
-            return res.status(400).json({ message: 'Email and password are required' });
+            return res.status(400).json({ 
+                success: false,
+                message: 'Email and password are required' 
+            });
         }
+
+        console.log('🔐 VENDOR LOGIN ATTEMPT:', email);
 
         const vendor = await Vendor.findOne({ email });
         if (!vendor) {
-            return res.status(401).json({ message: 'Invalid credentials' });
+            console.log('❌ VENDOR NOT FOUND');
+            return res.status(401).json({ 
+                success: false,
+                message: 'Invalid credentials' 
+            });
         }
+
+        console.log('✅ VENDOR FOUND:', vendor.email);
+        console.log('  - Approved:', vendor.approved);
+        console.log('  - Active:', vendor.active);
 
         if (!vendor.approved) {
             return res.status(403).json({ 
+                success: false,
                 message: 'Account pending admin approval' 
             });
         }
 
-        const isPasswordCorrect = await vendor.matchPassword(password);
-        if (!isPasswordCorrect) {
-            return res.status(401).json({ message: 'Invalid credentials' });
+        // Use comparePassword (the method that exists in your model)
+        if (typeof vendor.comparePassword !== 'function') {
+            console.log('❌ VENDOR MODEL MISSING comparePassword METHOD');
+            return res.status(500).json({ 
+                success: false,
+                message: 'System error: Invalid vendor configuration' 
+            });
         }
 
-        // Generate token with proper error handling
+        const isPasswordCorrect = await vendor.comparePassword(password);
+        if (!isPasswordCorrect) {
+            console.log('❌ PASSWORD MISMATCH');
+            return res.status(401).json({ 
+                success: false,
+                message: 'Invalid credentials' 
+            });
+        }
+
+        // Generate token with longer expiration
         let token;
         try {
             token = generateToken(vendor._id, 'vendor');
         } catch (tokenError) {
             console.error('Token generation error:', tokenError);
             return res.status(500).json({ 
-                message: 'Authentication failed',
-                error: tokenError.message 
+                success: false,
+                message: 'Authentication failed'
             });
         }
 
+        console.log('✅ LOGIN SUCCESSFUL');
+
         return res.status(200).json({
-            success: true, // Add success flag
+            success: true,
             _id: vendor._id,
             email: vendor.email,
-            username: vendor.username, // Make sure this is included
+            username: vendor.username,
             role: 'vendor',
             approved: vendor.approved,
-            active: vendor.active, // Include active status
+            active: vendor.active,
             token: token
         });
 
     } catch (error) {
         console.error('Vendor login error:', error);
         return res.status(500).json({ 
-            message: 'Login failed',
-            error: error.message 
+            success: false,
+            message: 'Login failed'
         });
     }
 };

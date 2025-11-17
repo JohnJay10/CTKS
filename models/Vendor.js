@@ -7,6 +7,7 @@ const VendorSchema = new mongoose.Schema({
     password: { type: String, required: true },
     role: { type: String, enum: ['vendor', 'admin'], default: 'vendor' },
     approved: { type: Boolean, default: false },
+    active: { type: Boolean, default: true }, 
     tokenAvailable: { type: Boolean, default: false },
     businessName: { type: String },
     customerLimit: { type: Number, default: 1000 },
