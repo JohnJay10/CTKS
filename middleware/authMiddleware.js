@@ -19,6 +19,7 @@ const auth = (roles = []) => {
         try {
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
             console.log('  - Decoded token role:', decoded.role);
+            console.log('  - Decoded token ID:', decoded.id);
 
             // Check role permissions
             if (roles.length && !roles.includes(decoded.role)) {
@@ -26,20 +27,58 @@ const auth = (roles = []) => {
                 return res.status(403).json({ message: 'Unauthorized for this action' });
             }
 
-            // Fetch user
-            const user = await Admin.findById(decoded.id).select('-password');
-            console.log('  - User found:', user?.username);
-            console.log('  - User role:', user?.role);
-            console.log('  - User permissions:', user?.permissions);
+            let user;
+
+            // Fetch user based on role
+            if (decoded.role === 'vendor') {
+                console.log('🔍 Looking for VENDOR...');
+                user = await Vendor.findById(decoded.id).select('-password');
+                console.log('  - Vendor found:', user ? 'YES' : 'NO');
+                
+                if (user) {
+                    console.log('  - Vendor approved:', user.approved);
+                    console.log('  - Vendor active:', user.active);
+                    
+                    // Check if vendor is approved and active
+                    if (!user.approved || !user.active) {
+                        console.log('❌ Vendor not approved or inactive');
+                        return res.status(401).json({ 
+                            message: 'Vendor account not approved or inactive' 
+                        });
+                    }
+                }
+            } else if (decoded.role === 'admin' || decoded.role === 'super_admin') {
+                console.log('🔍 Looking for ADMIN...');
+                user = await Admin.findById(decoded.id).select('-password');
+                console.log('  - Admin found:', user ? 'YES' : 'NO');
+                
+                if (user) {
+                    console.log('  - Admin active:', user.active);
+                    
+                    if (!user.active) {
+                        console.log('❌ Admin inactive');
+                        return res.status(401).json({ 
+                            message: 'Admin account inactive' 
+                        });
+                    }
+                }
+            }
 
             if (!user) {
-                console.log('❌ User not found');
+                console.log('❌ User not found for role:', decoded.role);
                 return res.status(401).json({ message: 'User not found' });
             }
 
-            console.log('✅ Auth successful');
+            console.log('✅ Auth successful - User:', user.username || user.email);
             req.user = user;
-            req.admin = user;
+            
+            // Set role-specific properties for backward compatibility
+            if (decoded.role === 'vendor') {
+                req.vendor = user;
+            } else if (decoded.role === 'admin' || decoded.role === 'super_admin') {
+                req.admin = user;
+            }
+            
             next();
 
         } catch (error) {

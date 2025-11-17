@@ -44,7 +44,7 @@ router.get('/getActivityAction/:activityId', auth(['vendor']), getActivityAction
 
 
 //Get All Bank Accounts 
-router.get('/default', auth(['vendor']), getAllAccounts);
+router.get('/default', auth(['vendor']), getAllAccounts);   
 
 
 //Get Vendor Limits

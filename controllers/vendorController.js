@@ -26,7 +26,7 @@ const loginVendor = async (req, res) => {
             });
         }
 
-        const isPasswordCorrect = await vendor.comparePassword(password);
+        const isPasswordCorrect = await vendor.matchPassword(password);
         if (!isPasswordCorrect) {
             return res.status(401).json({ message: 'Invalid credentials' });
         }
@@ -44,12 +44,14 @@ const loginVendor = async (req, res) => {
         }
 
         return res.status(200).json({
+            success: true, // Add success flag
             _id: vendor._id,
             email: vendor.email,
-            username: vendor.username,
+            username: vendor.username, // Make sure this is included
             role: 'vendor',
             approved: vendor.approved,
-            token
+            active: vendor.active, // Include active status
+            token: token
         });
 
     } catch (error) {
@@ -60,7 +62,6 @@ const loginVendor = async (req, res) => {
         });
     }
 };
-
 
 
 //Add Customers (Vendor Only )
